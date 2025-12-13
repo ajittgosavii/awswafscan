@@ -76,6 +76,9 @@ except Exception as e:
     MODULE_ERRORS['WAF Review'] = str(e)
 
 # Try new AI-powered Architecture Designer first, fallback to old module
+ARCHITECTURE_DESIGNER_AI = False
+ArchitectureDesignerModule = None
+
 try:
     from architecture_designer_ai import ArchitectureDesignerAI, render_architecture_designer_ai
     MODULE_STATUS['Architecture Designer'] = True
@@ -87,7 +90,7 @@ except Exception as e:
         ARCHITECTURE_DESIGNER_AI = False
     except Exception as e2:
         MODULE_STATUS['Architecture Designer'] = False
-        MODULE_ERRORS['Architecture Designer'] = str(e)
+        MODULE_ERRORS['Architecture Designer'] = f"AI: {str(e)}, Legacy: {str(e2)}"
         ARCHITECTURE_DESIGNER_AI = False
 
 try:
@@ -103,6 +106,22 @@ try:
 except Exception as e:
     MODULE_STATUS['Compliance'] = False
     MODULE_ERRORS['Compliance'] = str(e)
+
+# FinOps / Cost Optimization Module
+try:
+    from modules_finops import FinOpsEnterpriseModule
+    MODULE_STATUS['FinOps'] = True
+except Exception as e:
+    MODULE_STATUS['FinOps'] = False
+    MODULE_ERRORS['FinOps'] = str(e)
+
+# AI Assistant Module
+try:
+    from modules_ai_assistant import AIAssistantModule
+    MODULE_STATUS['AI Assistant'] = True
+except Exception as e:
+    MODULE_STATUS['AI Assistant'] = False
+    MODULE_ERRORS['AI Assistant'] = str(e)
 
 # ============================================================================
 # HEADER
@@ -2684,14 +2703,16 @@ def display_multi_account_results(results):
 def render_main_content():
     """Render main content area with tabs"""
     
-    # Create tabs - 6 focused tabs
+    # Create tabs - 8 enterprise tabs
     tabs = st.tabs([
         "🔍 WAF Scanner",
         "☁️ AWS Connector",
         "⚡ WAF Assessment",
         "🎨 Architecture Designer",
+        "💰 Cost Optimization",
         "🚀 EKS Modernization",
-        "🔒 Compliance"
+        "🔒 Compliance",
+        "🤖 AI Assistant"
     ])
     
     # Tab 1: WAF Scanner
@@ -2716,11 +2737,13 @@ def render_main_content():
     with tabs[3]:
         if MODULE_STATUS.get('Architecture Designer'):
             try:
-                # Check if AI-powered designer is available
-                if 'ARCHITECTURE_DESIGNER_AI' in dir() and ARCHITECTURE_DESIGNER_AI:
+                # Use AI-powered designer if available, otherwise fallback
+                if ARCHITECTURE_DESIGNER_AI:
                     render_architecture_designer_ai()
-                else:
+                elif ArchitectureDesignerModule is not None:
                     ArchitectureDesignerModule.render()
+                else:
+                    st.error("Architecture Designer module not properly loaded")
             except Exception as e:
                 st.error(f"Error loading Architecture Designer: {str(e)}")
                 import traceback
@@ -2729,8 +2752,22 @@ def render_main_content():
         else:
             st.error("Architecture Designer module not available")
     
-    # Tab 5: EKS Modernization
+    # Tab 5: Cost Optimization (FinOps)
     with tabs[4]:
+        if MODULE_STATUS.get('FinOps'):
+            try:
+                FinOpsEnterpriseModule.render()
+            except Exception as e:
+                st.error(f"Error loading FinOps: {str(e)}")
+                import traceback
+                with st.expander("Error Details"):
+                    st.code(traceback.format_exc())
+        else:
+            st.warning("FinOps module not available")
+            st.info("Cost optimization features require the FinOps module.")
+    
+    # Tab 6: EKS Modernization
+    with tabs[5]:
         if MODULE_STATUS.get('EKS Modernization'):
             try:
                 EKSModernizationModule.render()
@@ -2739,8 +2776,8 @@ def render_main_content():
         else:
             st.warning("EKS Modernization module not available")
     
-    # Tab 6: Compliance
-    with tabs[5]:
+    # Tab 7: Compliance
+    with tabs[6]:
         if MODULE_STATUS.get('Compliance'):
             try:
                 ComplianceModule.render()
@@ -2748,6 +2785,20 @@ def render_main_content():
                 st.error(f"Error loading Compliance: {str(e)}")
         else:
             st.warning("Compliance module not available")
+    
+    # Tab 8: AI Assistant
+    with tabs[7]:
+        if MODULE_STATUS.get('AI Assistant'):
+            try:
+                AIAssistantModule.render()
+            except Exception as e:
+                st.error(f"Error loading AI Assistant: {str(e)}")
+                import traceback
+                with st.expander("Error Details"):
+                    st.code(traceback.format_exc())
+        else:
+            st.warning("AI Assistant module not available")
+            st.info("AI-powered assistance requires the AI Assistant module and Anthropic API key.")
 
 # ============================================================================
 # MAIN APPLICATION
