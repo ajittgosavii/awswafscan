@@ -75,12 +75,20 @@ except Exception as e:
     MODULE_STATUS['WAF Review'] = False
     MODULE_ERRORS['WAF Review'] = str(e)
 
+# Try new AI-powered Architecture Designer first, fallback to old module
 try:
-    from modules_architecture_designer_waf import ArchitectureDesignerModule
+    from architecture_designer_ai import ArchitectureDesignerAI, render_architecture_designer_ai
     MODULE_STATUS['Architecture Designer'] = True
+    ARCHITECTURE_DESIGNER_AI = True
 except Exception as e:
-    MODULE_STATUS['Architecture Designer'] = False
-    MODULE_ERRORS['Architecture Designer'] = str(e)
+    try:
+        from modules_architecture_designer_waf import ArchitectureDesignerModule
+        MODULE_STATUS['Architecture Designer'] = True
+        ARCHITECTURE_DESIGNER_AI = False
+    except Exception as e2:
+        MODULE_STATUS['Architecture Designer'] = False
+        MODULE_ERRORS['Architecture Designer'] = str(e)
+        ARCHITECTURE_DESIGNER_AI = False
 
 try:
     from eks_modernization_module import EKSModernizationModule
@@ -2704,13 +2712,20 @@ def render_main_content():
         else:
             st.error("WAF Review module not available")
     
-    # Tab 4: Architecture Designer
+    # Tab 4: Architecture Designer (AI-Powered)
     with tabs[3]:
         if MODULE_STATUS.get('Architecture Designer'):
             try:
-                ArchitectureDesignerModule.render()
+                # Check if AI-powered designer is available
+                if 'ARCHITECTURE_DESIGNER_AI' in dir() and ARCHITECTURE_DESIGNER_AI:
+                    render_architecture_designer_ai()
+                else:
+                    ArchitectureDesignerModule.render()
             except Exception as e:
                 st.error(f"Error loading Architecture Designer: {str(e)}")
+                import traceback
+                with st.expander("Error Details"):
+                    st.code(traceback.format_exc())
         else:
             st.error("Architecture Designer module not available")
     
