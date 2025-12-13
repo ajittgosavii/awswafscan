@@ -13,6 +13,7 @@ RECENT UPDATES:
 import streamlit as st
 import sys
 from datetime import datetime
+ 
 
 # Import integrated WAF scanner (keeps all functionality + adds AI)
 from waf_scanner_integrated import render_integrated_waf_scanner
@@ -32,54 +33,6 @@ except ImportError as e:
     ENTERPRISE_MODULES_AVAILABLE = False
     print(f"⚠️ Enterprise modules not available: {e}")
     print("Install with: pip install plotly pandas firebase-admin")
-
-# ============================================================================
-# ✨ FIREBASE/FIRESTORE INITIALIZATION
-# ============================================================================
-print("Initializing Firebase/Firestore...")
-
-# Try to initialize Firebase if not already done
-try:
-    # Check if firebase_auth_module is being used
-    from firebase_auth_module import firebase_manager
-    
-    # If firebase_manager exists but not initialized, initialize it
-    if not firebase_manager.initialized and 'firebase' in st.secrets:
-        config = {'service_account_key': dict(st.secrets['firebase'])}
-        success, message = firebase_manager.initialize_firebase(config)
-        if success:
-            st.session_state.firebase_initialized = True
-            print(f"✅ Firebase initialized via firebase_manager: {message}")
-        else:
-            print(f"⚠️ Firebase initialization failed: {message}")
-    elif firebase_manager.initialized:
-        st.session_state.firebase_initialized = True
-        print("✅ Firebase already initialized via firebase_manager")
-        
-except ImportError:
-    # firebase_auth_module not available, try direct initialization
-    print("⚠️ firebase_auth_module not found, trying direct initialization...")
-    
-    if 'firebase' in st.secrets:
-        try:
-            import firebase_admin
-            from firebase_admin import credentials, firestore
-            
-            if not firebase_admin._apps:
-                cred = credentials.Certificate(dict(st.secrets['firebase']))
-                firebase_admin.initialize_app(cred)
-                st.session_state.firebase_initialized = True
-                print("✅ Firebase initialized directly from secrets")
-            else:
-                st.session_state.firebase_initialized = True
-                print("✅ Firebase already initialized")
-        except Exception as e:
-            print(f"⚠️ Firebase initialization error: {e}")
-    else:
-        print("⚠️ Firebase secrets not configured - historical tracking will be disabled")
-        
-except Exception as e:
-    print(f"⚠️ Firebase initialization error: {e}")
 
 
 # Page configuration
@@ -110,20 +63,7 @@ if 'initialized' not in st.session_state:
     
     if ENTERPRISE_MODULES_AVAILABLE:
         try:
-            # Initialize database with connection check
             st.session_state.db = get_database()
-            if st.session_state.db and hasattr(st.session_state.db, 'is_connected'):
-                if st.session_state.db.is_connected():
-                    print("✅ WAF Database connected to Firestore - Historical tracking enabled")
-                    st.session_state.historical_tracking_enabled = True
-                else:
-                    print("⚠️ WAF Database: Firestore not available - Historical tracking disabled")
-                    st.session_state.historical_tracking_enabled = False
-            else:
-                print("⚠️ WAF Database: Connection check unavailable")
-                st.session_state.historical_tracking_enabled = False
-            
-            # Initialize other enterprise modules
             st.session_state.compliance_mapper = ComplianceMapper()
             st.session_state.cost_calculator = CostImpactCalculator()
             st.session_state.dashboard = InteractiveDashboard()
@@ -131,7 +71,6 @@ if 'initialized' not in st.session_state:
             print("✅ Enterprise features initialized")
         except Exception as e:
             print(f"⚠️ Enterprise initialization failed: {e}")
-            st.session_state.historical_tracking_enabled = False
 
 # Module import status tracking
 MODULE_STATUS = {}
@@ -269,35 +208,6 @@ def render_sidebar():
         
         st.markdown("---")
         
-        # ============================================================================
-        # ✨ FIRESTORE CONNECTION STATUS
-        # ============================================================================
-        st.markdown("### 🔥 Firestore Status")
-        
-        if hasattr(st.session_state, 'db') and st.session_state.db:
-            if hasattr(st.session_state.db, 'is_connected') and st.session_state.db.is_connected():
-                st.success("✅ Connected")
-                st.caption("Historical tracking enabled")
-                
-                # Get and display stats
-                try:
-                    stats = st.session_state.db.get_summary_stats()
-                    if stats and stats.get('total_scans', 0) > 0:
-                        st.caption(f"📊 Total Scans: {stats['total_scans']}")
-                        st.caption(f"📋 Open Findings: {stats['open_findings']}")
-                        if stats.get('avg_waf_score', 0) > 0:
-                            st.caption(f"⭐ Avg WAF Score: {stats['avg_waf_score']:.1f}")
-                except Exception as e:
-                    st.caption("Stats unavailable")
-            else:
-                st.warning("⚠️ Not Connected")
-                st.caption("Historical tracking disabled")
-        else:
-            st.info("ℹ️ Not Configured")
-            st.caption("Add Firebase secrets to enable")
-        
-        st.markdown("---")
-        
         # Quick stats
         st.markdown("### 📊 Quick Stats")
         if 'last_scan' in st.session_state:
@@ -310,6 +220,95 @@ def render_sidebar():
         
         st.markdown("---")
         st.caption(f"Version 2.0.0 | {datetime.now().strftime('%Y-%m-%d')}")
+
+def render_sidebar():
+    """Render sidebar with AWS connection status"""
+    
+    # ... your existing sidebar code ...
+    
+    # ============================================================================
+    # 🔍 FIRESTORE DIAGNOSTICS (TEMPORARY)
+    # ============================================================================
+    st.markdown("---")
+    st.markdown("### 🔍 Firestore Debug")
+    
+    # Check 1: Secrets
+    if 'firebase' in st.secrets:
+        st.success("✅ Secrets configured")
+    else:
+        st.error("❌ No Firebase secrets")
+        st.info("Add in Streamlit Cloud → Settings → Secrets")
+    
+    # Check 2: Package
+    try:
+        import firebase_admin
+        st.success("✅ firebase-admin installed")
+    except ImportError:
+        st.error("❌ firebase-admin not installed")
+        st.info("Add to requirements.txt: firebase-admin>=6.2.0")
+    
+    # Check 3: Firebase initialized
+    try:
+        import firebase_admin
+        if firebase_admin._apps:
+            st.success("✅ Firebase initialized")
+        else:
+            st.warning("⚠️ Firebase not initialized")
+    except:
+        st.error("❌ Firebase check failed")
+    
+    # Check 4: Session state
+    if hasattr(st.session_state, 'db'):
+        if st.session_state.db:
+            if hasattr(st.session_state.db, 'is_connected'):
+                if st.session_state.db.is_connected():
+                    st.success("✅ Database connected")
+                else:
+                    st.error("❌ Database not connected")
+                    
+                    # Show internal state
+                    if hasattr(st.session_state.db, 'db'):
+                        st.info(f"Internal db: {st.session_state.db.db is not None}")
+            else:
+                st.warning("⚠️ is_connected() not found")
+        else:
+            st.error("❌ st.session_state.db is None")
+    else:
+        st.error("❌ st.session_state.db not set")
+    
+    # Try to initialize if missing
+    if st.button("🔧 Try to Fix Connection"):
+        try:
+            # Try firebase_manager first
+            from firebase_auth_module import firebase_manager
+            if not firebase_manager.initialized and 'firebase' in st.secrets:
+                config = {'service_account_key': dict(st.secrets['firebase'])}
+                success, message = firebase_manager.initialize_firebase(config)
+                st.write(f"firebase_manager: {message}")
+        except:
+            # Try direct initialization
+            try:
+                import firebase_admin
+                from firebase_admin import credentials, firestore
+                if not firebase_admin._apps and 'firebase' in st.secrets:
+                    cred = credentials.Certificate(dict(st.secrets['firebase']))
+                    firebase_admin.initialize_app(cred)
+                    st.success("✅ Initialized Firebase directly")
+            except Exception as e:
+                st.error(f"❌ Direct init failed: {e}")
+        
+        # Try to recreate database
+        try:
+            from waf_database_firestore_enterprise import get_database
+            st.session_state.db = get_database()
+            if st.session_state.db.is_connected():
+                st.success("✅ Database connected!")
+                st.balloons()
+            else:
+                st.error("❌ Still not connected")
+        except Exception as e:
+            st.error(f"❌ Database init failed: {e}")
+
 
 # ============================================================================
 # AWS CONNECTOR TAB
@@ -1141,37 +1140,10 @@ def render_waf_scanner_tab():
                         for finding in findings:
                             finding['remediation_options'] = remediation.get_remediation_options(finding)
                     
-                    # ============================================================================
-                    # ✨ FIRESTORE: Store scan in database (safe check)
-                    # ============================================================================
-                    if hasattr(st.session_state, 'db') and st.session_state.db:
-                        if hasattr(st.session_state.db, 'is_connected') and st.session_state.db.is_connected():
-                            try:
-                                # Get scan ID to prevent duplicate storage
-                                scan_id = scan_results.get('scan_id', '')
-                                stored_scans_key = 'stored_scan_ids'
-                                
-                                if stored_scans_key not in st.session_state:
-                                    st.session_state[stored_scans_key] = set()
-                                
-                                # Only store if not already stored
-                                if scan_id and scan_id not in st.session_state[stored_scans_key]:
-                                    stored_scan_id = st.session_state.db.store_scan(scan_results)
-                                    
-                                    if stored_scan_id and stored_scan_id != 'not_stored' and stored_scan_id != 'error':
-                                        st.success(f"✅ Scan stored in Firestore: {stored_scan_id}")
-                                        # Mark as stored
-                                        st.session_state[stored_scans_key].add(scan_id)
-                                    else:
-                                        st.warning("⚠️ Scan could not be stored in Firestore")
-                                        
-                            except Exception as e:
-                                st.warning(f"⚠️ Error storing scan: {e}")
-                        else:
-                            # Show info only once per session
-                            if st.session_state.get('show_firestore_info', True):
-                                st.info("ℹ️ Firestore not connected. Configure Firebase secrets to enable historical tracking.")
-                                st.session_state.show_firestore_info = False
+                    # Store in database (if Firestore configured) (safe check)
+                    if hasattr(st.session_state, 'db') and st.session_state.db and hasattr(st.session_state.db, 'db') and st.session_state.db.db:
+                        scan_id = st.session_state.db.store_scan(scan_results)
+                        st.success(f"✅ Scan stored in database: {scan_id}")
                     
                     # Show enterprise features notification
                     st.info("✨ **Enterprise features applied!** Check the **Dashboard**, **Cost Impact**, and **Remediation** tabs →")
