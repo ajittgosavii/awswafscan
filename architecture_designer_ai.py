@@ -601,12 +601,13 @@ class ArchitectureDesignerAI:
                 'connections': []
             }
         
-        # Design workflow tabs
+        # Design workflow tabs - now with 5 tabs including Upload & Analyze
         tabs = st.tabs([
             "1️⃣ Select Pattern",
             "2️⃣ Configure Services",
             "3️⃣ AI Recommendations",
-            "4️⃣ Visualize & Export"
+            "4️⃣ Visualize & Export",
+            "📤 Upload & Analyze"
         ])
         
         with tabs[0]:
@@ -620,6 +621,9 @@ class ArchitectureDesignerAI:
         
         with tabs[3]:
             ArchitectureDesignerAI._render_visualization()
+        
+        with tabs[4]:
+            ArchitectureDesignerAI._render_upload_analyze()
     
     @staticmethod
     def _render_pattern_selection():
@@ -1250,6 +1254,21 @@ output "vpc_id" {
 """
         
         return template
+    
+    @staticmethod
+    def _render_upload_analyze():
+        """Render the Upload & Analyze tab"""
+        try:
+            from architecture_upload_analyzer import render_upload_analyzer_tab
+            render_upload_analyzer_tab()
+        except ImportError as e:
+            st.error(f"Upload Analyzer module not available: {e}")
+            st.info("The Upload & Analyze feature requires the architecture_upload_analyzer module.")
+        except Exception as e:
+            st.error(f"Error loading Upload Analyzer: {e}")
+            import traceback
+            with st.expander("Error Details"):
+                st.code(traceback.format_exc())
 
 
 # ============================================================================
