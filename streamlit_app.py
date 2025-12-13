@@ -13,7 +13,7 @@ RECENT UPDATES:
 import streamlit as st
 import sys
 from datetime import datetime
- 
+from typing import Dict, Optional
 
 # Import integrated WAF scanner (keeps all functionality + adds AI)
 from waf_scanner_integrated import render_integrated_waf_scanner
@@ -33,6 +33,54 @@ except ImportError as e:
     ENTERPRISE_MODULES_AVAILABLE = False
     print(f"⚠️ Enterprise modules not available: {e}")
     print("Install with: pip install plotly pandas firebase-admin")
+
+# ============================================================================
+# ✨ FIREBASE/FIRESTORE INITIALIZATION
+# ============================================================================
+print("Initializing Firebase/Firestore...")
+
+# Try to initialize Firebase if not already done
+try:
+    # Check if firebase_auth_module is being used
+    from firebase_auth_module import firebase_manager
+    
+    # If firebase_manager exists but not initialized, initialize it
+    if not firebase_manager.initialized and 'firebase' in st.secrets:
+        config = {'service_account_key': dict(st.secrets['firebase'])}
+        success, message = firebase_manager.initialize_firebase(config)
+        if success:
+            st.session_state.firebase_initialized = True
+            print(f"✅ Firebase initialized via firebase_manager: {message}")
+        else:
+            print(f"⚠️ Firebase initialization failed: {message}")
+    elif firebase_manager.initialized:
+        st.session_state.firebase_initialized = True
+        print("✅ Firebase already initialized via firebase_manager")
+        
+except ImportError:
+    # firebase_auth_module not available, try direct initialization
+    print("⚠️ firebase_auth_module not found, trying direct initialization...")
+    
+    if 'firebase' in st.secrets:
+        try:
+            import firebase_admin
+            from firebase_admin import credentials, firestore
+            
+            if not firebase_admin._apps:
+                cred = credentials.Certificate(dict(st.secrets['firebase']))
+                firebase_admin.initialize_app(cred)
+                st.session_state.firebase_initialized = True
+                print("✅ Firebase initialized directly from secrets")
+            else:
+                st.session_state.firebase_initialized = True
+                print("✅ Firebase already initialized")
+        except Exception as e:
+            print(f"⚠️ Firebase initialization error: {e}")
+    else:
+        print("⚠️ Firebase secrets not configured - historical tracking will be disabled")
+        
+except Exception as e:
+    print(f"⚠️ Firebase initialization error: {e}")
 
 
 # Page configuration
@@ -63,7 +111,20 @@ if 'initialized' not in st.session_state:
     
     if ENTERPRISE_MODULES_AVAILABLE:
         try:
+            # Initialize database with connection check
             st.session_state.db = get_database()
+            if st.session_state.db and hasattr(st.session_state.db, 'is_connected'):
+                if st.session_state.db.is_connected():
+                    print("✅ WAF Database connected to Firestore - Historical tracking enabled")
+                    st.session_state.historical_tracking_enabled = True
+                else:
+                    print("⚠️ WAF Database: Firestore not available - Historical tracking disabled")
+                    st.session_state.historical_tracking_enabled = False
+            else:
+                print("⚠️ WAF Database: Connection check unavailable")
+                st.session_state.historical_tracking_enabled = False
+            
+            # Initialize other enterprise modules
             st.session_state.compliance_mapper = ComplianceMapper()
             st.session_state.cost_calculator = CostImpactCalculator()
             st.session_state.dashboard = InteractiveDashboard()
@@ -71,6 +132,7 @@ if 'initialized' not in st.session_state:
             print("✅ Enterprise features initialized")
         except Exception as e:
             print(f"⚠️ Enterprise initialization failed: {e}")
+            st.session_state.historical_tracking_enabled = False
 
 # Module import status tracking
 MODULE_STATUS = {}
@@ -208,6 +270,35 @@ def render_sidebar():
         
         st.markdown("---")
         
+        # ============================================================================
+        # ✨ FIRESTORE CONNECTION STATUS
+        # ============================================================================
+        st.markdown("### 🔥 Firestore Status")
+        
+        if hasattr(st.session_state, 'db') and st.session_state.db:
+            if hasattr(st.session_state.db, 'is_connected') and st.session_state.db.is_connected():
+                st.success("✅ Connected")
+                st.caption("Historical tracking enabled")
+                
+                # Get and display stats
+                try:
+                    stats = st.session_state.db.get_summary_stats()
+                    if stats and stats.get('total_scans', 0) > 0:
+                        st.caption(f"📊 Total Scans: {stats['total_scans']}")
+                        st.caption(f"📋 Open Findings: {stats['open_findings']}")
+                        if stats.get('avg_waf_score', 0) > 0:
+                            st.caption(f"⭐ Avg WAF Score: {stats['avg_waf_score']:.1f}")
+                except Exception as e:
+                    st.caption("Stats unavailable")
+            else:
+                st.warning("⚠️ Not Connected")
+                st.caption("Historical tracking disabled")
+        else:
+            st.info("ℹ️ Not Configured")
+            st.caption("Add Firebase secrets to enable")
+        
+        st.markdown("---")
+        
         # Quick stats
         st.markdown("### 📊 Quick Stats")
         if 'last_scan' in st.session_state:
@@ -220,7 +311,6 @@ def render_sidebar():
         
         st.markdown("---")
         st.caption(f"Version 2.0.0 | {datetime.now().strftime('%Y-%m-%d')}")
-
 
 # ============================================================================
 # AWS CONNECTOR TAB
@@ -1020,11 +1110,19 @@ def render_waf_scanner_tab():
     # ============================================================================
     # After scan completes, enhance results with enterprise features
     if ENTERPRISE_MODULES_AVAILABLE:
-        # Check if scan just completed
-        if hasattr(st.session_state, 'scan_results') and st.session_state.get('scan_results'):
-            scan_results = st.session_state.scan_results
-            
-            # Store for enterprise tabs
+        # Check if scan just completed - check multiple possible keys
+        scan_results = None
+        
+        # Try different session state keys where scan results might be stored
+        scan_keys = ['scan_results', 'waf_scan_results', 'latest_scan', 'current_scan_results']
+        for key in scan_keys:
+            if hasattr(st.session_state, key) and st.session_state.get(key):
+                scan_results = st.session_state.get(key)
+                break
+        
+        # If we found scan results, process them
+        if scan_results:
+            # Store for enterprise tabs (ensure it's always available)
             st.session_state.last_scan_results = scan_results
             
             # Add enterprise enhancements
@@ -1052,10 +1150,37 @@ def render_waf_scanner_tab():
                         for finding in findings:
                             finding['remediation_options'] = remediation.get_remediation_options(finding)
                     
-                    # Store in database (if Firestore configured) (safe check)
-                    if hasattr(st.session_state, 'db') and st.session_state.db and hasattr(st.session_state.db, 'db') and st.session_state.db.db:
-                        scan_id = st.session_state.db.store_scan(scan_results)
-                        st.success(f"✅ Scan stored in database: {scan_id}")
+                    # ============================================================================
+                    # ✨ FIRESTORE: Store scan in database (safe check)
+                    # ============================================================================
+                    if hasattr(st.session_state, 'db') and st.session_state.db:
+                        if hasattr(st.session_state.db, 'is_connected') and st.session_state.db.is_connected():
+                            try:
+                                # Get scan ID to prevent duplicate storage
+                                scan_id = scan_results.get('scan_id', '')
+                                stored_scans_key = 'stored_scan_ids'
+                                
+                                if stored_scans_key not in st.session_state:
+                                    st.session_state[stored_scans_key] = set()
+                                
+                                # Only store if not already stored
+                                if scan_id and scan_id not in st.session_state[stored_scans_key]:
+                                    stored_scan_id = st.session_state.db.store_scan(scan_results)
+                                    
+                                    if stored_scan_id and stored_scan_id != 'not_stored' and stored_scan_id != 'error':
+                                        st.success(f"✅ Scan stored in Firestore: {stored_scan_id}")
+                                        # Mark as stored
+                                        st.session_state[stored_scans_key].add(scan_id)
+                                    else:
+                                        st.warning("⚠️ Scan could not be stored in Firestore")
+                                        
+                            except Exception as e:
+                                st.warning(f"⚠️ Error storing scan: {e}")
+                        else:
+                            # Show info only once per session
+                            if st.session_state.get('show_firestore_info', True):
+                                st.info("ℹ️ Firestore not connected. Configure Firebase secrets to enable historical tracking.")
+                                st.session_state.show_firestore_info = False
                     
                     # Show enterprise features notification
                     st.info("✨ **Enterprise features applied!** Check the **Dashboard**, **Cost Impact**, and **Remediation** tabs →")
@@ -2239,11 +2364,174 @@ def display_multi_account_results(results):
                     st.markdown("- Underutilized instances\n- Unattached EBS volumes")
 
 # ============================================================================
+# ✨ ENTERPRISE TABS - HELPER FUNCTIONS
+# ============================================================================
+
+def get_waf_data() -> tuple[Optional[Dict], Optional[str]]:
+    """
+    Get WAF data from any available source
+    
+    Returns:
+        (data, source_name) tuple
+        - data: Dict with WAF data or None
+        - source_name: String describing the data source or None
+    """
+    
+    # Priority 1: Check last_scan_results (automated scan)
+    if hasattr(st.session_state, 'last_scan_results') and st.session_state.last_scan_results:
+        return st.session_state.last_scan_results, "Automated Scan"
+    
+    # Priority 2: Check manual assessment results
+    if hasattr(st.session_state, 'waf_assessment_results') and st.session_state.waf_assessment_results:
+        assessment = st.session_state.waf_assessment_results
+        return convert_assessment_to_dashboard_format(assessment), "Manual Assessment"
+    
+    # Priority 3: Check other scan result keys
+    scan_keys = ['scan_results', 'waf_scan_results', 'latest_scan']
+    for key in scan_keys:
+        if hasattr(st.session_state, key) and getattr(st.session_state, key):
+            return getattr(st.session_state, key), "Scan Results"
+    
+    # Priority 4: Try to get latest from Firestore
+    if hasattr(st.session_state, 'db') and st.session_state.db:
+        if hasattr(st.session_state.db, 'is_connected') and st.session_state.db.is_connected():
+            try:
+                data = get_latest_scan_from_firestore()
+                if data:
+                    return data, "Firestore (Historical)"
+            except Exception as e:
+                print(f"Error loading from Firestore: {e}")
+    
+    return None, None
+
+
+def convert_assessment_to_dashboard_format(assessment: Dict) -> Dict:
+    """
+    Convert manual WAF assessment data to unified dashboard format
+    
+    Manual assessments have different structure than automated scans,
+    this function normalizes the data for dashboard consumption
+    """
+    
+    # Extract pillar scores from assessment
+    pillar_scores = assessment.get('pillar_scores', {})
+    
+    # Calculate overall score from pillar scores
+    if pillar_scores:
+        overall_score = sum(pillar_scores.values()) / len(pillar_scores)
+    else:
+        overall_score = 0
+    
+    # Extract findings/issues
+    findings = []
+    
+    # Check different possible keys for findings
+    for key in ['findings', 'issues', 'recommendations', 'gaps']:
+        if key in assessment and assessment[key]:
+            findings.extend(assessment[key] if isinstance(assessment[key], list) else [assessment[key]])
+    
+    # Count by severity
+    severity_counts = {
+        'critical': 0,
+        'high': 0,
+        'medium': 0,
+        'low': 0
+    }
+    
+    for finding in findings:
+        severity = finding.get('severity', finding.get('priority', 'medium')).lower()
+        if severity in severity_counts:
+            severity_counts[severity] += 1
+        elif 'critical' in severity or 'urgent' in severity:
+            severity_counts['critical'] += 1
+        elif 'high' in severity:
+            severity_counts['high'] += 1
+        elif 'low' in severity:
+            severity_counts['low'] += 1
+        else:
+            severity_counts['medium'] += 1
+    
+    # Create unified format
+    unified = {
+        'scan_id': assessment.get('assessment_id', f"assessment_{datetime.now().strftime('%Y%m%d_%H%M%S')}"),
+        'account_id': assessment.get('account_id', 'manual'),
+        'account_name': assessment.get('account_name', 'Manual Assessment'),
+        'scan_date': assessment.get('created_at', assessment.get('date', datetime.now())),
+        'scan_type': 'manual_assessment',
+        'total_findings': len(findings),
+        'critical_count': severity_counts['critical'],
+        'high_count': severity_counts['high'],
+        'medium_count': severity_counts['medium'],
+        'low_count': severity_counts['low'],
+        'overall_waf_score': overall_score,
+        'pillar_scores': pillar_scores,
+        'findings': findings,
+        'questions_answered': assessment.get('questions_answered', 0),
+        'total_questions': assessment.get('total_questions', 200),
+        'completion_percentage': assessment.get('completion_percentage', 0),
+        'data_source': 'Manual Assessment'
+    }
+    
+    return unified
+
+
+def get_latest_scan_from_firestore() -> Optional[Dict]:
+    """
+    Get the most recent scan from Firestore
+    Works with both automated scans and manual assessments
+    """
+    
+    if not hasattr(st.session_state, 'db') or not st.session_state.db:
+        return None
+    
+    db = st.session_state.db
+    if not hasattr(db, 'db') or not db.db:
+        return None
+    
+    try:
+        # Try to get latest WAF scan
+        scans = db.db.collection('waf_scans')\
+            .order_by('scan_date', direction='DESCENDING')\
+            .limit(1)\
+            .stream()
+        
+        for scan in scans:
+            scan_data = scan.to_dict()
+            
+            # Get findings for this scan
+            findings = []
+            findings_ref = db.db.collection('waf_findings')\
+                .where('scan_id', '==', scan_data.get('scan_id'))\
+                .stream()
+            
+            for finding in findings_ref:
+                findings.append(finding.to_dict())
+            
+            scan_data['findings'] = findings
+            scan_data['data_source'] = 'Firestore'
+            return scan_data
+        
+        # If no WAF scans, try manual assessments
+        assessments = db.db.collection('assessments')\
+            .order_by('created_at', direction='DESCENDING')\
+            .limit(1)\
+            .stream()
+        
+        for assessment in assessments:
+            assessment_data = assessment.to_dict()
+            return convert_assessment_to_dashboard_format(assessment_data)
+    
+    except Exception as e:
+        print(f"Error fetching from Firestore: {e}")
+        return None
+
+
+# ============================================================================
 # ✨ ENTERPRISE TABS
 # ============================================================================
 
 def render_enterprise_dashboard_tab():
-    """Enterprise Dashboard with Interactive Charts"""
+    """Enterprise Dashboard with Interactive Charts - Works with both automated scans and manual assessments"""
     
     st.header("📊 Executive Dashboard")
     
@@ -2253,9 +2541,25 @@ def render_enterprise_dashboard_tab():
         st.info("See documentation: `FIRESTORE_INTEGRATION_GUIDE.md`")
         return
     
-    if not hasattr(st.session_state, 'last_scan_results') or st.session_state.last_scan_results is None:
-        st.info("ℹ️ Run a WAF scan first to see the dashboard")
-        st.markdown("👉 Go to the **🔍 WAF Scanner** tab and complete a scan")
+    # ============================================================================
+    # ✨ UNIFIED DATA RETRIEVAL - Checks multiple sources
+    # ============================================================================
+    waf_data, data_source = get_waf_data()
+    
+    # If no data found, show helpful message
+    if not waf_data:
+        st.info("ℹ️ No WAF data available yet")
+        st.markdown("""
+        ### Get started by:
+        
+        **Option 1: Automated Scan**
+        👉 Go to the **🔍 WAF Scanner** tab and run an automated AWS scan
+        
+        **Option 2: Manual Assessment**  
+        👉 Go to the **⚡ WAF Assessment** tab and complete the 200+ question assessment
+        
+        Both methods will populate this dashboard with insights and metrics.
+        """)
         return
     
     # Safe check for dashboard attribute
@@ -2266,7 +2570,9 @@ def render_enterprise_dashboard_tab():
     
     try:
         dashboard = st.session_state.dashboard
-        results = st.session_state.last_scan_results
+        
+        # Show data source
+        st.caption(f"📊 Data source: {data_source}")
         
         # Key Metrics
         st.subheader("📊 Key Metrics")
@@ -2275,13 +2581,13 @@ def render_enterprise_dashboard_tab():
         with col1:
             st.metric(
                 "Total Findings",
-                results.get('total_findings', 0),
+                waf_data.get('total_findings', 0),
                 delta=None,
                 help="Total number of WAF findings across all pillars"
             )
         
         with col2:
-            critical = results.get('critical_count', 0)
+            critical = waf_data.get('critical_count', 0)
             st.metric(
                 "Critical",
                 critical,
@@ -2291,7 +2597,7 @@ def render_enterprise_dashboard_tab():
             )
         
         with col3:
-            high = results.get('high_count', 0)
+            high = waf_data.get('high_count', 0)
             st.metric(
                 "High",
                 high,
@@ -2301,7 +2607,7 @@ def render_enterprise_dashboard_tab():
             )
         
         with col4:
-            score = results.get('overall_waf_score', 0)
+            score = waf_data.get('overall_waf_score', 0)
             st.metric(
                 "WAF Score",
                 f"{score:.0f}/100",
@@ -2317,17 +2623,17 @@ def render_enterprise_dashboard_tab():
         
         with col1:
             st.subheader("🎯 Severity Distribution")
-            fig = dashboard.create_severity_distribution_pie(results.get('findings', []))
+            fig = dashboard.create_severity_distribution_pie(waf_data.get('findings', []))
             st.plotly_chart(fig, use_container_width=True)
         
         with col2:
             st.subheader("⭐ WAF Pillar Scores")
-            fig = dashboard.create_pillar_radar_chart(results.get('pillar_scores', {}))
+            fig = dashboard.create_pillar_radar_chart(waf_data.get('pillar_scores', {}))
             st.plotly_chart(fig, use_container_width=True)
         
         # Service Breakdown
         st.subheader("🔧 Findings by AWS Service")
-        fig = dashboard.create_service_breakdown_bar(results.get('findings', []))
+        fig = dashboard.create_service_breakdown_bar(waf_data.get('findings', []))
         st.plotly_chart(fig, use_container_width=True)
         
         # Account Info
@@ -2426,7 +2732,7 @@ def render_historical_trends_tab():
 
 
 def render_cost_impact_tab():
-    """Cost Impact Analysis"""
+    """Cost Impact Analysis - Works with both automated scans and manual assessments"""
     
     st.header("💰 Cost Impact Analysis")
     
@@ -2434,9 +2740,22 @@ def render_cost_impact_tab():
         st.warning("⚠️ Cost analysis requires enterprise modules")
         return
     
-    if not hasattr(st.session_state, 'last_scan_results') or st.session_state.last_scan_results is None:
-        st.info("ℹ️ Run a WAF scan first to see cost impact")
-        st.markdown("👉 Go to the **🔍 WAF Scanner** tab and complete a scan")
+    # Get WAF data from any source
+    waf_data, data_source = get_waf_data()
+    
+    if not waf_data:
+        st.info("ℹ️ No WAF data available for cost analysis")
+        st.markdown("""
+        ### Get started by:
+        
+        **Option 1: Automated Scan**
+        👉 Go to the **🔍 WAF Scanner** tab and run an automated AWS scan
+        
+        **Option 2: Manual Assessment**  
+        👉 Go to the **⚡ WAF Assessment** tab and complete the 200+ question assessment
+        
+        Both methods will populate this cost analysis with insights.
+        """)
         return
     
     # Safe check for cost_calculator attribute
@@ -2452,8 +2771,11 @@ def render_cost_impact_tab():
         return
     
     try:
+        # Show data source
+        st.caption(f"📊 Data source: {data_source}")
+        
         cost_calculator = st.session_state.cost_calculator
-        findings = st.session_state.last_scan_results.get('findings', [])
+        findings = waf_data.get('findings', [])
         
         # Calculate portfolio impact
         with st.spinner("Calculating cost impact..."):
@@ -2538,7 +2860,7 @@ def render_cost_impact_tab():
 
 
 def render_remediation_tab():
-    """Automated Remediation Code Generation"""
+    """Automated Remediation Code Generation - Works with both automated scans and manual assessments"""
     
     st.header("🔧 Automated Remediation")
     
@@ -2546,12 +2868,25 @@ def render_remediation_tab():
         st.warning("⚠️ Remediation engine requires enterprise modules")
         return
     
-    if not hasattr(st.session_state, 'last_scan_results') or st.session_state.last_scan_results is None:
-        st.info("ℹ️ Run a WAF scan first to see remediation options")
-        st.markdown("👉 Go to the **🔍 WAF Scanner** tab and complete a scan")
+    # Get WAF data from any source
+    waf_data, data_source = get_waf_data()
+    
+    if not waf_data:
+        st.info("ℹ️ No WAF data available for remediation")
+        st.markdown("""
+        ### Get started by:
+        
+        **Option 1: Automated Scan**
+        👉 Go to the **🔍 WAF Scanner** tab and run an automated AWS scan
+        
+        **Option 2: Manual Assessment**  
+        👉 Go to the **⚡ WAF Assessment** tab and complete the 200+ question assessment
+        
+        Both methods will identify findings that can be remediated.
+        """)
         return
     
-    findings = st.session_state.last_scan_results.get('findings', [])
+    findings = waf_data.get('findings', [])
     
     if not findings:
         st.info("ℹ️ No findings to remediate")
@@ -2562,6 +2897,9 @@ def render_remediation_tab():
         st.error("❌ Remediation engine not initialized")
         st.info("Please ensure enterprise modules are installed")
         return
+    
+    # Show data source
+    st.caption(f"📊 Data source: {data_source}")
     
     # Finding selector
     st.subheader("🔍 Select Finding")
