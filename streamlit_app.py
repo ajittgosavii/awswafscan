@@ -53,6 +53,13 @@ if 'initialized' not in st.session_state:
     # ============================================================================
     # ✨ ENTERPRISE FEATURES INITIALIZATION
     # ============================================================================
+    # Always initialize these attributes (even if None) to prevent AttributeError
+    st.session_state.db = None
+    st.session_state.compliance_mapper = None
+    st.session_state.cost_calculator = None
+    st.session_state.dashboard = None
+    st.session_state.remediation = None
+    
     if ENTERPRISE_MODULES_AVAILABLE:
         try:
             st.session_state.db = get_database()
@@ -1023,25 +1030,28 @@ def render_waf_scanner_tab():
                 findings = scan_results.get('findings', [])
                 
                 if findings:
-                    # Add compliance mappings
-                    compliance_mapper = st.session_state.compliance_mapper
-                    for finding in findings:
-                        finding['compliance_frameworks'] = compliance_mapper.get_compliance_mappings(
-                            finding.get('title', '')
-                        )
+                    # Add compliance mappings (safe check)
+                    if hasattr(st.session_state, 'compliance_mapper') and st.session_state.compliance_mapper:
+                        compliance_mapper = st.session_state.compliance_mapper
+                        for finding in findings:
+                            finding['compliance_frameworks'] = compliance_mapper.get_compliance_mappings(
+                                finding.get('title', '')
+                            )
                     
-                    # Add cost impact
-                    cost_calculator = st.session_state.cost_calculator
-                    for finding in findings:
-                        finding['cost_impact'] = cost_calculator.calculate_finding_impact(finding)
+                    # Add cost impact (safe check)
+                    if hasattr(st.session_state, 'cost_calculator') and st.session_state.cost_calculator:
+                        cost_calculator = st.session_state.cost_calculator
+                        for finding in findings:
+                            finding['cost_impact'] = cost_calculator.calculate_finding_impact(finding)
                     
-                    # Add remediation options
-                    remediation = st.session_state.remediation
-                    for finding in findings:
-                        finding['remediation_options'] = remediation.get_remediation_options(finding)
+                    # Add remediation options (safe check)
+                    if hasattr(st.session_state, 'remediation') and st.session_state.remediation:
+                        remediation = st.session_state.remediation
+                        for finding in findings:
+                            finding['remediation_options'] = remediation.get_remediation_options(finding)
                     
-                    # Store in database (if Firestore configured)
-                    if st.session_state.db and hasattr(st.session_state.db, 'db') and st.session_state.db.db:
+                    # Store in database (if Firestore configured) (safe check)
+                    if hasattr(st.session_state, 'db') and st.session_state.db and hasattr(st.session_state.db, 'db') and st.session_state.db.db:
                         scan_id = st.session_state.db.store_scan(scan_results)
                         st.success(f"✅ Scan stored in database: {scan_id}")
                     
@@ -2246,6 +2256,12 @@ def render_enterprise_dashboard_tab():
         st.markdown("👉 Go to the **🔍 WAF Scanner** tab and complete a scan")
         return
     
+    # Safe check for dashboard attribute
+    if not hasattr(st.session_state, 'dashboard') or not st.session_state.dashboard:
+        st.error("❌ Dashboard module not initialized")
+        st.info("Please ensure enterprise modules are installed: `pip install plotly pandas`")
+        return
+    
     try:
         dashboard = st.session_state.dashboard
         results = st.session_state.last_scan_results
@@ -2331,7 +2347,8 @@ def render_historical_trends_tab():
         st.warning("⚠️ Historical tracking requires enterprise modules")
         return
     
-    if not st.session_state.db or not hasattr(st.session_state.db, 'db') or not st.session_state.db.db:
+    # Safe check for db attribute
+    if not hasattr(st.session_state, 'db') or not st.session_state.db or not hasattr(st.session_state.db, 'db') or not st.session_state.db.db:
         st.warning("⚠️ Historical tracking requires Firestore database")
         st.info("""
         **Setup Firestore for persistence:**
@@ -2373,11 +2390,14 @@ def render_historical_trends_tab():
                     if not trends.empty:
                         st.success(f"✅ Found {len(trends)} historical scans")
                         
-                        # Show trend chart
+                        # Show trend chart (safe check for dashboard)
                         st.subheader("📉 Trend Analysis")
-                        dashboard = st.session_state.dashboard
-                        fig = dashboard.create_trend_chart(trends)
-                        st.plotly_chart(fig, use_container_width=True)
+                        if hasattr(st.session_state, 'dashboard') and st.session_state.dashboard:
+                            dashboard = st.session_state.dashboard
+                            fig = dashboard.create_trend_chart(trends)
+                            st.plotly_chart(fig, use_container_width=True)
+                        else:
+                            st.warning("⚠️ Dashboard module not available for chart visualization")
                         
                         # Summary stats
                         col1, col2, col3 = st.columns(3)
@@ -2415,6 +2435,18 @@ def render_cost_impact_tab():
     if not hasattr(st.session_state, 'last_scan_results') or st.session_state.last_scan_results is None:
         st.info("ℹ️ Run a WAF scan first to see cost impact")
         st.markdown("👉 Go to the **🔍 WAF Scanner** tab and complete a scan")
+        return
+    
+    # Safe check for cost_calculator attribute
+    if not hasattr(st.session_state, 'cost_calculator') or not st.session_state.cost_calculator:
+        st.error("❌ Cost calculator module not initialized")
+        st.info("Please ensure enterprise modules are installed")
+        return
+    
+    # Safe check for dashboard attribute (needed for charts)
+    if not hasattr(st.session_state, 'dashboard') or not st.session_state.dashboard:
+        st.error("❌ Dashboard module not initialized")
+        st.info("Please ensure enterprise modules are installed")
         return
     
     try:
@@ -2521,6 +2553,12 @@ def render_remediation_tab():
     
     if not findings:
         st.info("ℹ️ No findings to remediate")
+        return
+    
+    # Safe check for remediation attribute
+    if not hasattr(st.session_state, 'remediation') or not st.session_state.remediation:
+        st.error("❌ Remediation engine not initialized")
+        st.info("Please ensure enterprise modules are installed")
         return
     
     # Finding selector
