@@ -48,6 +48,7 @@ if 'initialized' not in st.session_state:
     st.session_state.current_tab = "waf_scanner"
     st.session_state.connected_accounts = []
     st.session_state.scan_mode = "single"
+    st.session_state.last_scan_results = None  # Always initialize this
     
     # ============================================================================
     # ✨ ENTERPRISE FEATURES INITIALIZATION
@@ -59,7 +60,6 @@ if 'initialized' not in st.session_state:
             st.session_state.cost_calculator = CostImpactCalculator()
             st.session_state.dashboard = InteractiveDashboard()
             st.session_state.remediation = RemediationEngine()
-            st.session_state.last_scan_results = None
             print("✅ Enterprise features initialized")
         except Exception as e:
             print(f"⚠️ Enterprise initialization failed: {e}")
@@ -2241,7 +2241,7 @@ def render_enterprise_dashboard_tab():
         st.info("See documentation: `FIRESTORE_INTEGRATION_GUIDE.md`")
         return
     
-    if st.session_state.last_scan_results is None:
+    if not hasattr(st.session_state, 'last_scan_results') or st.session_state.last_scan_results is None:
         st.info("ℹ️ Run a WAF scan first to see the dashboard")
         st.markdown("👉 Go to the **🔍 WAF Scanner** tab and complete a scan")
         return
@@ -2412,7 +2412,7 @@ def render_cost_impact_tab():
         st.warning("⚠️ Cost analysis requires enterprise modules")
         return
     
-    if st.session_state.last_scan_results is None:
+    if not hasattr(st.session_state, 'last_scan_results') or st.session_state.last_scan_results is None:
         st.info("ℹ️ Run a WAF scan first to see cost impact")
         st.markdown("👉 Go to the **🔍 WAF Scanner** tab and complete a scan")
         return
@@ -2512,7 +2512,7 @@ def render_remediation_tab():
         st.warning("⚠️ Remediation engine requires enterprise modules")
         return
     
-    if st.session_state.last_scan_results is None:
+    if not hasattr(st.session_state, 'last_scan_results') or st.session_state.last_scan_results is None:
         st.info("ℹ️ Run a WAF scan first to see remediation options")
         st.markdown("👉 Go to the **🔍 WAF Scanner** tab and complete a scan")
         return
