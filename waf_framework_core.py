@@ -142,11 +142,13 @@ class WAFAssessment:
     workload_description: str
     environment: str  # Development, Staging, Production
     industry: str
+    
+    # Team - owner is required, so must come before optional fields
+    owner: str
+    
+    # Optional fields with defaults
     aws_account_ids: List[str] = field(default_factory=list)
     regions: List[str] = field(default_factory=list)
-    
-    # Team
-    owner: str
     reviewers: List[str] = field(default_factory=list)
     stakeholders: List[str] = field(default_factory=list)
     

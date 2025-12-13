@@ -8,79 +8,23 @@ RECENT UPDATES:
 - AI-powered analysis with Claude API
 - Professional PDF report generation
 - Complete WAF framework mapping (all 6 pillars)
+- Demo/Live mode toggle for demonstrations
 """
 
 import streamlit as st
 import sys
 from datetime import datetime
-from typing import Dict, Optional
 
 # Import integrated WAF scanner (keeps all functionality + adds AI)
 from waf_scanner_integrated import render_integrated_waf_scanner
 
-# ============================================================================
-# ✨ ENTERPRISE MODULE IMPORTS
-# ============================================================================
-try:
-    from waf_database_firestore_enterprise import get_database
-    from compliance_mapper import ComplianceMapper  
-    from cost_calculator import CostImpactCalculator
-    from interactive_dashboard import InteractiveDashboard
-    from remediation_engine import RemediationEngine
-    ENTERPRISE_MODULES_AVAILABLE = True
-    print("✅ Enterprise modules loaded successfully")
-except ImportError as e:
-    ENTERPRISE_MODULES_AVAILABLE = False
-    print(f"⚠️ Enterprise modules not available: {e}")
-    print("Install with: pip install plotly pandas firebase-admin")
-
-# ============================================================================
-# ✨ FIREBASE/FIRESTORE INITIALIZATION
-# ============================================================================
-print("Initializing Firebase/Firestore...")
-
-# Try to initialize Firebase if not already done
-try:
-    # Check if firebase_auth_module is being used
-    from firebase_auth_module import firebase_manager
-    
-    # If firebase_manager exists but not initialized, initialize it
-    if not firebase_manager.initialized and 'firebase' in st.secrets:
-        config = {'service_account_key': dict(st.secrets['firebase'])}
-        success, message = firebase_manager.initialize_firebase(config)
-        if success:
-            st.session_state.firebase_initialized = True
-            print(f"✅ Firebase initialized via firebase_manager: {message}")
-        else:
-            print(f"⚠️ Firebase initialization failed: {message}")
-    elif firebase_manager.initialized:
-        st.session_state.firebase_initialized = True
-        print("✅ Firebase already initialized via firebase_manager")
-        
-except ImportError:
-    # firebase_auth_module not available, try direct initialization
-    print("⚠️ firebase_auth_module not found, trying direct initialization...")
-    
-    if 'firebase' in st.secrets:
-        try:
-            import firebase_admin
-            from firebase_admin import credentials, firestore
-            
-            if not firebase_admin._apps:
-                cred = credentials.Certificate(dict(st.secrets['firebase']))
-                firebase_admin.initialize_app(cred)
-                st.session_state.firebase_initialized = True
-                print("✅ Firebase initialized directly from secrets")
-            else:
-                st.session_state.firebase_initialized = True
-                print("✅ Firebase already initialized")
-        except Exception as e:
-            print(f"⚠️ Firebase initialization error: {e}")
-    else:
-        print("⚠️ Firebase secrets not configured - historical tracking will be disabled")
-        
-except Exception as e:
-    print(f"⚠️ Firebase initialization error: {e}")
+# Import demo mode manager
+from demo_mode_manager import (
+    get_demo_manager, 
+    render_mode_toggle, 
+    render_mode_banner,
+    render_demo_account_info
+)
 
 
 # Page configuration
@@ -97,42 +41,7 @@ if 'initialized' not in st.session_state:
     st.session_state.current_tab = "waf_scanner"
     st.session_state.connected_accounts = []
     st.session_state.scan_mode = "single"
-    st.session_state.last_scan_results = None  # Always initialize this
-    
-    # ============================================================================
-    # ✨ ENTERPRISE FEATURES INITIALIZATION
-    # ============================================================================
-    # Always initialize these attributes (even if None) to prevent AttributeError
-    st.session_state.db = None
-    st.session_state.compliance_mapper = None
-    st.session_state.cost_calculator = None
-    st.session_state.dashboard = None
-    st.session_state.remediation = None
-    
-    if ENTERPRISE_MODULES_AVAILABLE:
-        try:
-            # Initialize database with connection check
-            st.session_state.db = get_database()
-            if st.session_state.db and hasattr(st.session_state.db, 'is_connected'):
-                if st.session_state.db.is_connected():
-                    print("✅ WAF Database connected to Firestore - Historical tracking enabled")
-                    st.session_state.historical_tracking_enabled = True
-                else:
-                    print("⚠️ WAF Database: Firestore not available - Historical tracking disabled")
-                    st.session_state.historical_tracking_enabled = False
-            else:
-                print("⚠️ WAF Database: Connection check unavailable")
-                st.session_state.historical_tracking_enabled = False
-            
-            # Initialize other enterprise modules
-            st.session_state.compliance_mapper = ComplianceMapper()
-            st.session_state.cost_calculator = CostImpactCalculator()
-            st.session_state.dashboard = InteractiveDashboard()
-            st.session_state.remediation = RemediationEngine()
-            print("✅ Enterprise features initialized")
-        except Exception as e:
-            print(f"⚠️ Enterprise initialization failed: {e}")
-            st.session_state.historical_tracking_enabled = False
+    st.session_state.demo_mode = True  # Default to demo mode for safety
 
 # Module import status tracking
 MODULE_STATUS = {}
@@ -194,6 +103,9 @@ except Exception as e:
 def render_header():
     """Render application header"""
     
+    # Render demo mode banner if in demo mode
+    render_mode_banner()
+    
     st.markdown("""
         <div style="background: linear-gradient(135deg, #FF9900 0%, #232F3E 100%); 
                     padding: 2rem; border-radius: 10px; margin-bottom: 2rem; color: white;">
@@ -211,14 +123,51 @@ def render_header():
 # ============================================================================
 
 def render_sidebar():
-    """Render sidebar with AWS connection status"""
+    """Render sidebar with AWS connection status and mode toggle"""
+    
+    demo_mgr = get_demo_manager()
     
     with st.sidebar:
-        st.markdown("### 🔧 AWS Connection Status")
+        # ====== MODE TOGGLE (Top Priority) ======
+        st.markdown("### 🎮 Mode Selection")
         
-        # Scan mode selector
+        col1, col2 = st.columns([1, 1])
+        
+        with col1:
+            demo_selected = st.button(
+                "🎭 Demo",
+                type="primary" if demo_mgr.is_demo_mode else "secondary",
+                use_container_width=True,
+                help="Use simulated data for demonstrations"
+            )
+            if demo_selected and not demo_mgr.is_demo_mode:
+                demo_mgr.is_demo_mode = True
+                st.rerun()
+        
+        with col2:
+            live_selected = st.button(
+                "🔴 Live",
+                type="primary" if not demo_mgr.is_demo_mode else "secondary",
+                use_container_width=True,
+                help="Connect to real AWS accounts"
+            )
+            if live_selected and demo_mgr.is_demo_mode:
+                demo_mgr.is_demo_mode = False
+                st.rerun()
+        
+        # Mode description
+        if demo_mgr.is_demo_mode:
+            st.info("🎭 **Demo Mode** - Simulated data, no AWS needed")
+        else:
+            st.success("🔴 **Live Mode** - Real AWS connection")
+        
+        st.markdown("---")
+        
+        # ====== SCAN MODE ======
+        st.markdown("### 🔧 Scan Configuration")
+        
         scan_mode = st.radio(
-            "Scan Mode",
+            "Account Scope",
             ["Single Account", "Multi-Account"],
             key="scan_mode_radio"
         )
@@ -226,37 +175,54 @@ def render_sidebar():
         
         st.markdown("---")
         
-        # AWS connection status
-        if st.session_state.scan_mode == "single":
-            st.markdown("#### Single Account")
-            try:
-                session = get_aws_session()
-                if session:
-                    st.success("✅ AWS Connected")
-                    
-                    try:
-                        import boto3
-                        sts = session.client('sts')
-                        identity = sts.get_caller_identity()
-                        account_id = identity['Account']
-                        st.info(f"**Account:** {account_id}")
-                    except:
-                        pass
-                else:
-                    st.warning("⚠️ Not Connected")
-                    st.info("👉 Go to AWS Connector tab")
-            except:
-                st.warning("⚠️ Not Connected")
+        # ====== CONNECTION STATUS ======
+        st.markdown("### ☁️ Connection Status")
+        
+        if demo_mgr.is_demo_mode:
+            # Demo mode - show simulated connection
+            demo_identity = demo_mgr.get_demo_identity()
+            st.success("✅ Demo Account Connected")
+            st.info(f"**Account:** {demo_identity['Account']}")
+            st.info(f"**Region:** {demo_mgr.config.region}")
+            
+            if st.session_state.scan_mode == "multi":
+                demo_accounts = demo_mgr.get_demo_accounts()
+                st.success(f"✅ {len(demo_accounts)} Demo Accounts")
+                with st.expander("View Accounts"):
+                    for acc in demo_accounts:
+                        st.caption(f"📌 {acc['name']}: {acc['account_id']}")
         else:
-            st.markdown("#### Multi-Account")
-            num_accounts = len(st.session_state.connected_accounts)
-            if num_accounts > 0:
-                st.success(f"✅ {num_accounts} Accounts Connected")
-                for acc in st.session_state.connected_accounts:
-                    st.info(f"📌 {acc.get('name', 'Account')}: {acc.get('account_id', 'N/A')}")
+            # Live mode - real AWS connection
+            if st.session_state.scan_mode == "single":
+                st.markdown("#### Single Account")
+                try:
+                    session = get_aws_session()
+                    if session:
+                        st.success("✅ AWS Connected")
+                        
+                        try:
+                            import boto3
+                            sts = session.client('sts')
+                            identity = sts.get_caller_identity()
+                            account_id = identity['Account']
+                            st.info(f"**Account:** {account_id}")
+                        except:
+                            pass
+                    else:
+                        st.warning("⚠️ Not Connected")
+                        st.info("👉 Go to AWS Connector tab")
+                except:
+                    st.warning("⚠️ Not Connected")
             else:
-                st.warning("⚠️ No Accounts Connected")
-                st.info("👉 Go to AWS Connector tab")
+                st.markdown("#### Multi-Account")
+                num_accounts = len(st.session_state.connected_accounts)
+                if num_accounts > 0:
+                    st.success(f"✅ {num_accounts} Accounts Connected")
+                    for acc in st.session_state.connected_accounts:
+                        st.info(f"📌 {acc.get('name', 'Account')}: {acc.get('account_id', 'N/A')}")
+                else:
+                    st.warning("⚠️ No Accounts Connected")
+                    st.info("👉 Go to AWS Connector tab")
         
         st.markdown("---")
         
@@ -270,38 +236,17 @@ def render_sidebar():
         
         st.markdown("---")
         
-        # ============================================================================
-        # ✨ FIRESTORE CONNECTION STATUS
-        # ============================================================================
-        st.markdown("### 🔥 Firestore Status")
-        
-        if hasattr(st.session_state, 'db') and st.session_state.db:
-            if hasattr(st.session_state.db, 'is_connected') and st.session_state.db.is_connected():
-                st.success("✅ Connected")
-                st.caption("Historical tracking enabled")
-                
-                # Get and display stats
-                try:
-                    stats = st.session_state.db.get_summary_stats()
-                    if stats and stats.get('total_scans', 0) > 0:
-                        st.caption(f"📊 Total Scans: {stats['total_scans']}")
-                        st.caption(f"📋 Open Findings: {stats['open_findings']}")
-                        if stats.get('avg_waf_score', 0) > 0:
-                            st.caption(f"⭐ Avg WAF Score: {stats['avg_waf_score']:.1f}")
-                except Exception as e:
-                    st.caption("Stats unavailable")
-            else:
-                st.warning("⚠️ Not Connected")
-                st.caption("Historical tracking disabled")
-        else:
-            st.info("ℹ️ Not Configured")
-            st.caption("Add Firebase secrets to enable")
-        
-        st.markdown("---")
-        
         # Quick stats
         st.markdown("### 📊 Quick Stats")
-        if 'last_scan' in st.session_state:
+        
+        if demo_mgr.is_demo_mode:
+            # Demo stats
+            demo_findings = demo_mgr.get_demo_waf_findings()
+            summary = demo_findings['summary']
+            st.metric("Resources Scanned", demo_mgr.get_demo_resources()['ec2_instances'] + demo_mgr.get_demo_resources()['rds_databases'])
+            st.metric("WAF Issues Found", summary['total_findings'])
+            st.metric("WAF Score", f"{summary['waf_score']}%")
+        elif 'last_scan' in st.session_state:
             scan = st.session_state.last_scan
             st.metric("Resources Scanned", scan.get('resource_count', 0))
             st.metric("WAF Issues Found", scan.get('issue_count', 0))
@@ -310,9 +255,7 @@ def render_sidebar():
             st.info("No scans yet. Start a WAF scan!")
         
         st.markdown("---")
-        st.caption(f"Version 2.0.0 | {datetime.now().strftime('%Y-%m-%d')}")
-
-
+        st.caption(f"Version 4.0.0 | {datetime.now().strftime('%Y-%m-%d')}")
 
 # ============================================================================
 # AWS CONNECTOR TAB
@@ -321,8 +264,49 @@ def render_sidebar():
 def render_aws_connector_tab():
     """AWS Connector for Single/Multi-Account WAF Scanning"""
     
+    demo_mgr = get_demo_manager()
+    
     st.markdown("## ☁️ AWS Account Connector")
     st.markdown("### Configure AWS credentials for Well-Architected Framework scanning")
+    
+    # Demo mode notice
+    if demo_mgr.is_demo_mode:
+        st.success("""
+        🎭 **Demo Mode Active** - AWS Connector is simulated
+        
+        In Demo Mode, you don't need to configure real AWS credentials. 
+        The application uses simulated data for all scans and assessments.
+        
+        **Demo Account Details:**
+        - Account ID: `123456789012`
+        - Region: `us-east-1`
+        - 5 demo accounts available for multi-account testing
+        
+        👉 Switch to **Live Mode** in the sidebar to connect real AWS accounts.
+        """)
+        
+        # Show demo accounts
+        st.markdown("### 📋 Available Demo Accounts")
+        
+        demo_accounts = demo_mgr.get_demo_accounts()
+        
+        cols = st.columns(3)
+        for i, acc in enumerate(demo_accounts):
+            with cols[i % 3]:
+                st.markdown(f"""
+                **{acc['name']}**
+                - ID: `{acc['account_id']}`
+                - Status: ✅ {acc['status']}
+                - OU: {acc['ou']}
+                """)
+        
+        st.markdown("---")
+        st.info("💡 **Tip:** Demo Mode is perfect for training, presentations, and testing the application without AWS costs or risks.")
+        
+        return  # Exit early in demo mode
+    
+    # Live mode - show real connector
+    st.info("🔴 **Live Mode** - Configure real AWS credentials below")
     
     # Mode selection
     col1, col2 = st.columns([1, 3])
@@ -1083,7 +1067,7 @@ def render_multi_account_connector():
 
 def render_waf_scanner_tab():
     """
-    AI-Integrated WAF Scanner
+    AI-Integrated WAF Scanner with Demo Mode Support
     
     This scanner KEEPS all your existing functionality:
     ✅ Single account scanning
@@ -1098,165 +1082,417 @@ def render_waf_scanner_tab():
     + Pattern detection
     + Intelligent prioritization
     
-    ✨ Plus Enterprise Features:
-    + Compliance framework mapping
-    + Cost impact analysis
-    + Automated remediation code
-    + Historical tracking
+    Demo Mode:
+    + Full functionality with simulated data
+    + No AWS credentials required
+    + Perfect for demonstrations
     """
-    # Render the scanner
-    render_integrated_waf_scanner()
+    demo_mgr = get_demo_manager()
     
-    # ============================================================================
-    # ✨ ENTERPRISE: Capture and Enhance Scan Results
-    # ============================================================================
-    # After scan completes, enhance results with enterprise features
-    if ENTERPRISE_MODULES_AVAILABLE:
-        # Check if scan just completed - check multiple possible keys
-        scan_results = None
-        
-        # Try different session state keys where scan results might be stored
-        scan_keys = ['scan_results', 'waf_scan_results', 'latest_scan', 'current_scan_results']
-        for key in scan_keys:
-            if hasattr(st.session_state, key) and st.session_state.get(key):
-                scan_results = st.session_state.get(key)
-                break
-        
-        # If we found scan results, process them
-        if scan_results:
-            # Store for enterprise tabs (ensure it's always available)
-            st.session_state.last_scan_results = scan_results
-            
-            # Add enterprise enhancements
-            try:
-                findings = scan_results.get('findings', [])
-                
-                if findings:
-                    # Add compliance mappings (safe check)
-                    if hasattr(st.session_state, 'compliance_mapper') and st.session_state.compliance_mapper:
-                        compliance_mapper = st.session_state.compliance_mapper
-                        for finding in findings:
-                            finding['compliance_frameworks'] = compliance_mapper.get_compliance_mappings(
-                                finding.get('title', '')
-                            )
-                    
-                    # Add cost impact (safe check)
-                    if hasattr(st.session_state, 'cost_calculator') and st.session_state.cost_calculator:
-                        cost_calculator = st.session_state.cost_calculator
-                        for finding in findings:
-                            finding['cost_impact'] = cost_calculator.calculate_finding_impact(finding)
-                    
-                    # Add remediation options (safe check)
-                    if hasattr(st.session_state, 'remediation') and st.session_state.remediation:
-                        remediation = st.session_state.remediation
-                        for finding in findings:
-                            finding['remediation_options'] = remediation.get_remediation_options(finding)
-                    
-                    # ============================================================================
-                    # ✨ FIRESTORE: Store scan in database (safe check)
-                    # ============================================================================
-                    if hasattr(st.session_state, 'db') and st.session_state.db:
-                        if hasattr(st.session_state.db, 'is_connected') and st.session_state.db.is_connected():
-                            try:
-                                # Get scan ID to prevent duplicate storage
-                                scan_id = scan_results.get('scan_id', '')
-                                stored_scans_key = 'stored_scan_ids'
-                                
-                                if stored_scans_key not in st.session_state:
-                                    st.session_state[stored_scans_key] = set()
-                                
-                                # Only store if not already stored
-                                if scan_id and scan_id not in st.session_state[stored_scans_key]:
-                                    stored_scan_id = st.session_state.db.store_scan(scan_results)
-                                    
-                                    if stored_scan_id and stored_scan_id != 'not_stored' and stored_scan_id != 'error':
-                                        st.success(f"✅ Scan stored in Firestore: {stored_scan_id}")
-                                        # Mark as stored
-                                        st.session_state[stored_scans_key].add(scan_id)
-                                    else:
-                                        st.warning("⚠️ Scan could not be stored in Firestore")
-                                        
-                            except Exception as e:
-                                st.warning(f"⚠️ Error storing scan: {e}")
-                        else:
-                            # Show info only once per session
-                            if st.session_state.get('show_firestore_info', True):
-                                st.info("ℹ️ Firestore not connected. Configure Firebase secrets to enable historical tracking.")
-                                st.session_state.show_firestore_info = False
-                    
-                    # Show enterprise features notification
-                    st.info("✨ **Enterprise features applied!** Check the **Dashboard**, **Cost Impact**, and **Remediation** tabs →")
-                    
-            except Exception as e:
-                st.warning(f"⚠️ Could not apply all enterprise features: {e}")
+    if demo_mgr.is_demo_mode:
+        render_demo_waf_scanner()
+    else:
+        render_integrated_waf_scanner()
 
-def render_waf_scanner_tab():
-    """WAF Scanner with forced result storage"""
+
+def render_demo_waf_scanner():
+    """Render WAF Scanner in Demo Mode with simulated data"""
+    demo_mgr = get_demo_manager()
     
-    # Render the scanner
-    render_integrated_waf_scanner()
+    st.markdown("## 🔍 AI-Enhanced WAF Scanner")
     
-    # ============================================================================
-    # 🔧 FORCE STORE SCAN RESULTS (even if 0 findings)
-    # ============================================================================
+    # Demo mode info box
+    st.info("""
+    **🎭 Demo Mode Active** - Using simulated data for demonstration purposes.
     
-    # Check if scan just completed
-    if st.session_state.get('scan_completed', False):
+    This demo showcases all features of the WAF Scanner without requiring AWS credentials.
+    Switch to **Live Mode** to scan real AWS accounts.
+    """)
+    
+    # Scan configuration
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        scan_mode = st.selectbox(
+            "Scan Mode",
+            ["Quick Scan", "Standard Scan", "Comprehensive Scan"],
+            help="Quick: 2-3 min | Standard: 5-10 min | Comprehensive: 15-20 min"
+        )
+    
+    with col2:
+        demo_accounts = demo_mgr.get_demo_accounts()
+        selected_account = st.selectbox(
+            "Select Account",
+            options=[f"{acc['name']} ({acc['account_id']})" for acc in demo_accounts],
+            help="Select a demo account to scan"
+        )
+    
+    with col3:
+        demo_region = st.selectbox(
+            "Region",
+            ["us-east-1", "us-west-2", "eu-west-1", "ap-southeast-1"],
+            help="Select AWS region"
+        )
+    
+    # WAF Pillars selection
+    st.markdown("### 📋 WAF Pillars to Assess")
+    
+    pillar_cols = st.columns(6)
+    pillars = {}
+    pillar_names = [
+        ("🔒", "Security"),
+        ("🔄", "Reliability"),
+        ("⚡", "Performance"),
+        ("💰", "Cost Optimization"),
+        ("🛠️", "Operational Excellence"),
+        ("🌱", "Sustainability")
+    ]
+    
+    for i, (icon, name) in enumerate(pillar_names):
+        with pillar_cols[i]:
+            pillars[name] = st.checkbox(f"{icon} {name}", value=True, key=f"demo_pillar_{name}")
+    
+    st.markdown("---")
+    
+    # Scan button
+    if st.button("🚀 Run Demo Scan", type="primary", use_container_width=True):
+        run_demo_scan(demo_mgr, scan_mode, selected_account, demo_region, pillars)
+    
+    # Show sample results if available
+    if 'demo_scan_results' in st.session_state:
+        display_demo_scan_results(st.session_state.demo_scan_results)
+
+
+def run_demo_scan(demo_mgr, scan_mode, account, region, pillars):
+    """Execute a simulated demo scan with progress animation"""
+    import time
+    
+    progress_bar = st.progress(0)
+    status_text = st.empty()
+    
+    # Simulate scan progress
+    scan_steps = [
+        (10, "🔍 Initializing scanner..."),
+        (20, "☁️ Connecting to demo account..."),
+        (35, "📊 Scanning EC2 instances..."),
+        (45, "🗄️ Scanning RDS databases..."),
+        (55, "📦 Scanning S3 buckets..."),
+        (65, "🔐 Analyzing IAM configurations..."),
+        (75, "🛡️ Checking security configurations..."),
+        (85, "📈 Analyzing against WAF best practices..."),
+        (95, "📝 Generating AI insights..."),
+        (100, "✅ Scan complete!"),
+    ]
+    
+    for progress, message in scan_steps:
+        status_text.text(message)
+        progress_bar.progress(progress)
+        time.sleep(0.3 if scan_mode == "Quick Scan" else 0.5)
+    
+    status_text.empty()
+    
+    # Get demo findings
+    demo_findings = demo_mgr.get_demo_waf_findings()
+    demo_resources = demo_mgr.get_demo_resources()
+    demo_compliance = demo_mgr.get_demo_compliance_status()
+    demo_costs = demo_mgr.get_demo_cost_data()
+    
+    # Store results
+    st.session_state.demo_scan_results = {
+        'findings': demo_findings,
+        'resources': demo_resources,
+        'compliance': demo_compliance,
+        'costs': demo_costs,
+        'account': account,
+        'region': region,
+        'scan_time': datetime.now().isoformat(),
+        'pillars': pillars,
+        'scan_mode': scan_mode,
+    }
+    
+    st.success("✅ Demo scan completed successfully!")
+    st.rerun()
+
+
+def display_demo_scan_results(results):
+    """Display demo scan results with full visualization"""
+    
+    st.markdown("---")
+    st.markdown("## 📊 Demo Scan Results")
+    
+    findings = results['findings']
+    resources = results['resources']
+    compliance = results['compliance']
+    costs = results['costs']
+    summary = findings['summary']
+    
+    # Summary metrics
+    col1, col2, col3, col4, col5 = st.columns(5)
+    
+    with col1:
+        st.metric(
+            "WAF Score", 
+            f"{summary['waf_score']}/100",
+            delta=f"+3 vs last scan" if summary['waf_score'] > 70 else f"-2 vs last scan"
+        )
+    
+    with col2:
+        st.metric("Critical Issues", summary['critical_count'], delta_color="inverse")
+    
+    with col3:
+        st.metric("High Issues", summary['high_count'], delta_color="inverse")
+    
+    with col4:
+        st.metric("Medium Issues", summary['medium_count'])
+    
+    with col5:
+        st.metric("Total Findings", summary['total_findings'])
+    
+    # Tabs for different views
+    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+        "📋 Findings",
+        "📊 Pillar Scores",
+        "🏗️ Resources",
+        "✅ Compliance",
+        "💰 Cost Analysis"
+    ])
+    
+    with tab1:
+        render_demo_findings_tab(findings)
+    
+    with tab2:
+        render_demo_pillar_scores(findings)
+    
+    with tab3:
+        render_demo_resources_tab(resources)
+    
+    with tab4:
+        render_demo_compliance_tab(compliance)
+    
+    with tab5:
+        render_demo_costs_tab(costs)
+    
+    # Export options
+    st.markdown("---")
+    st.markdown("### 📥 Export Options")
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        if st.button("📄 Generate PDF Report", use_container_width=True):
+            st.info("📄 PDF report generation available in full version")
+    
+    with col2:
+        if st.button("📊 Export to Excel", use_container_width=True):
+            st.info("📊 Excel export available in full version")
+    
+    with col3:
+        if st.button("📋 Copy Summary", use_container_width=True):
+            st.info("📋 Summary copied to clipboard!")
+
+
+def render_demo_findings_tab(findings):
+    """Render findings tab with demo data"""
+    
+    st.markdown("### 🔍 Security Findings by Pillar")
+    
+    for pillar_key, pillar_data in findings['findings'].items():
+        pillar_name = pillar_data['pillar']
+        finding_count = pillar_data['finding_count']
         
-        # Get scan results from any available key
-        scan_results = None
+        with st.expander(f"📌 {pillar_name} ({finding_count} findings)", expanded=pillar_key=="security"):
+            for finding in pillar_data['findings'][:5]:  # Show first 5
+                severity_colors = {
+                    "critical": "🔴",
+                    "high": "🟠",
+                    "medium": "🟡",
+                    "low": "🟢"
+                }
+                
+                severity_icon = severity_colors.get(finding['severity'], "⚪")
+                
+                st.markdown(f"""
+                **{severity_icon} {finding['title']}**
+                - Severity: `{finding['severity'].upper()}`
+                - Resource: `{finding['resource_id']}`
+                - Compliance: {', '.join(finding['compliance_frameworks'][:3])}
+                """)
+                st.markdown("---")
+            
+            if finding_count > 5:
+                st.caption(f"... and {finding_count - 5} more findings")
+
+
+def render_demo_pillar_scores(findings):
+    """Render pillar scores visualization"""
+    import plotly.graph_objects as go
+    
+    pillar_scores = findings['pillar_scores']
+    
+    # Radar chart
+    categories = list(pillar_scores.keys())
+    values = list(pillar_scores.values())
+    
+    fig = go.Figure()
+    
+    fig.add_trace(go.Scatterpolar(
+        r=values + [values[0]],
+        theta=categories + [categories[0]],
+        fill='toself',
+        name='Current Score',
+        line_color='#FF9900'
+    ))
+    
+    fig.update_layout(
+        polar=dict(
+            radialaxis=dict(
+                visible=True,
+                range=[0, 100]
+            )),
+        showlegend=True,
+        title="WAF Pillar Scores"
+    )
+    
+    st.plotly_chart(fig, use_container_width=True)
+    
+    # Score breakdown
+    st.markdown("### 📈 Score Breakdown")
+    
+    cols = st.columns(3)
+    pillar_icons = {
+        "security": "🔒",
+        "reliability": "🔄",
+        "performance": "⚡",
+        "cost": "💰",
+        "operational": "🛠️",
+        "sustainability": "🌱"
+    }
+    
+    for i, (pillar, score) in enumerate(pillar_scores.items()):
+        with cols[i % 3]:
+            icon = pillar_icons.get(pillar, "📊")
+            color = "green" if score >= 80 else "orange" if score >= 60 else "red"
+            st.metric(f"{icon} {pillar.title()}", f"{score}%")
+
+
+def render_demo_resources_tab(resources):
+    """Render resources inventory tab"""
+    import plotly.express as px
+    import pandas as pd
+    
+    st.markdown("### 🏗️ Resource Inventory")
+    
+    # Resource count summary
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        st.metric("EC2 Instances", resources['ec2_instances'])
+    with col2:
+        st.metric("RDS Databases", resources['rds_databases'])
+    with col3:
+        st.metric("S3 Buckets", resources['s3_buckets'])
+    with col4:
+        st.metric("Lambda Functions", resources['lambda_functions'])
+    
+    # Resource distribution chart
+    resource_data = {
+        'Service': ['EC2', 'RDS', 'S3', 'Lambda', 'EKS', 'VPC', 'IAM Roles', 'Security Groups'],
+        'Count': [
+            resources['ec2_instances'],
+            resources['rds_databases'],
+            resources['s3_buckets'],
+            resources['lambda_functions'],
+            resources['eks_clusters'],
+            resources['vpc_count'],
+            resources['iam_roles'],
+            resources['security_groups']
+        ]
+    }
+    
+    df = pd.DataFrame(resource_data)
+    
+    fig = px.bar(df, x='Service', y='Count', color='Count',
+                 color_continuous_scale='Oranges',
+                 title='Resource Distribution by Service')
+    
+    st.plotly_chart(fig, use_container_width=True)
+
+
+def render_demo_compliance_tab(compliance):
+    """Render compliance status tab"""
+    import plotly.express as px
+    import pandas as pd
+    
+    st.markdown("### ✅ Compliance Status")
+    
+    # Compliance summary
+    for framework_key, framework_data in compliance.items():
+        col1, col2, col3 = st.columns([2, 1, 1])
         
-        # Try different keys
-        for key in ['scan_results', 'waf_scan_results', 'latest_scan', 'current_scan_results']:
-            if hasattr(st.session_state, key):
-                temp_results = getattr(st.session_state, key)
-                if temp_results and isinstance(temp_results, dict):
-                    scan_results = temp_results
-                    break
+        with col1:
+            st.markdown(f"**{framework_data['name']}**")
+        with col2:
+            st.metric("Score", f"{framework_data['score']}%")
+        with col3:
+            passed = framework_data['passed']
+            total = framework_data['total_controls']
+            st.progress(passed / total)
         
-        # If we found results, ensure they're stored properly
-        if scan_results:
-            # CRITICAL: Always store as last_scan_results
-            st.session_state.last_scan_results = scan_results
-            
-            # Ensure minimum required fields exist
-            if 'total_findings' not in scan_results:
-                scan_results['total_findings'] = len(scan_results.get('findings', []))
-            
-            if 'overall_waf_score' not in scan_results:
-                # Calculate score from pillar scores if available
-                pillar_scores = scan_results.get('pillar_scores', {})
-                if pillar_scores:
-                    scan_results['overall_waf_score'] = sum(pillar_scores.values()) / len(pillar_scores)
-                else:
-                    # If no findings, give a perfect score
-                    scan_results['overall_waf_score'] = 100
-            
-            # Add severity counts if missing
-            if 'critical_count' not in scan_results:
-                findings = scan_results.get('findings', [])
-                scan_results['critical_count'] = sum(1 for f in findings if f.get('severity', '').upper() == 'CRITICAL')
-                scan_results['high_count'] = sum(1 for f in findings if f.get('severity', '').upper() == 'HIGH')
-                scan_results['medium_count'] = sum(1 for f in findings if f.get('severity', '').upper() == 'MEDIUM')
-                scan_results['low_count'] = sum(1 for f in findings if f.get('severity', '').upper() == 'LOW')
-            
-            # Show confirmation
-            st.success(f"✅ Scan results stored! Total findings: {scan_results['total_findings']}")
-            
-            # Store in Firestore if available
-            if ENTERPRISE_MODULES_AVAILABLE and hasattr(st.session_state, 'db'):
-                if st.session_state.db and hasattr(st.session_state.db, 'is_connected'):
-                    if st.session_state.db.is_connected():
-                        try:
-                            scan_id = st.session_state.db.store_scan(scan_results)
-                            if scan_id:
-                                st.info(f"📊 Also stored in Firestore: {scan_id}")
-                        except Exception as e:
-                            st.warning(f"⚠️ Firestore storage failed: {e}")
-        else:
-            # No scan results found
-            st.warning("⚠️ Scan completed but no results found in session state")
-            st.info("This might be normal if scan is still in progress")
+        st.markdown("---")
+
+
+def render_demo_costs_tab(costs):
+    """Render cost analysis tab"""
+    import plotly.express as px
+    import plotly.graph_objects as go
+    import pandas as pd
+    
+    st.markdown("### 💰 Cost Analysis")
+    
+    # Cost metrics
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        st.metric(
+            "Current Monthly Cost",
+            f"${costs['current_monthly_cost']:,.2f}"
+        )
+    
+    with col2:
+        st.metric(
+            "Potential Savings",
+            f"${costs['potential_savings']:,.2f}",
+            delta=f"{costs['savings_percentage']}%"
+        )
+    
+    with col3:
+        st.metric(
+            "Projected Cost",
+            f"${costs['projected_monthly_cost']:,.2f}"
+        )
+    
+    # Cost by service pie chart
+    cost_df = pd.DataFrame([
+        {'Service': k, 'Cost': v}
+        for k, v in costs['cost_by_service'].items()
+    ])
+    
+    fig = px.pie(cost_df, values='Cost', names='Service',
+                 title='Cost Distribution by Service',
+                 color_discrete_sequence=px.colors.sequential.Oranges)
+    
+    st.plotly_chart(fig, use_container_width=True)
+    
+    # Optimization opportunities
+    st.markdown("### 💡 Optimization Opportunities")
+    
+    for opp in costs['optimization_opportunities']:
+        st.markdown(f"""
+        **{opp['category']}**: {opp['description']}
+        - Monthly Savings: **${opp['monthly_savings']:,.2f}**
+        - Effort: `{opp['effort']}`
+        """)
+        st.markdown("---")
 
 def render_single_account_scanner():
     """Single account WAF scanner - DEPRECATED
@@ -2434,656 +2670,20 @@ def display_multi_account_results(results):
                     st.markdown("- Underutilized instances\n- Unattached EBS volumes")
 
 # ============================================================================
-# ✨ ENTERPRISE TABS - HELPER FUNCTIONS
-# ============================================================================
-
-def get_waf_data() -> tuple[Optional[Dict], Optional[str]]:
-    """
-    Get WAF data from any available source
-    
-    Returns:
-        (data, source_name) tuple
-        - data: Dict with WAF data or None
-        - source_name: String describing the data source or None
-    """
-    
-    # Priority 1: Check last_scan_results (automated scan)
-    if hasattr(st.session_state, 'last_scan_results') and st.session_state.last_scan_results:
-        return st.session_state.last_scan_results, "Automated Scan"
-    
-    # Priority 2: Check manual assessment results
-    if hasattr(st.session_state, 'waf_assessment_results') and st.session_state.waf_assessment_results:
-        assessment = st.session_state.waf_assessment_results
-        return convert_assessment_to_dashboard_format(assessment), "Manual Assessment"
-    
-    # Priority 3: Check other scan result keys
-    scan_keys = ['scan_results', 'waf_scan_results', 'latest_scan']
-    for key in scan_keys:
-        if hasattr(st.session_state, key) and getattr(st.session_state, key):
-            return getattr(st.session_state, key), "Scan Results"
-    
-    # Priority 4: Try to get latest from Firestore
-    if hasattr(st.session_state, 'db') and st.session_state.db:
-        if hasattr(st.session_state.db, 'is_connected') and st.session_state.db.is_connected():
-            try:
-                data = get_latest_scan_from_firestore()
-                if data:
-                    return data, "Firestore (Historical)"
-            except Exception as e:
-                print(f"Error loading from Firestore: {e}")
-    
-    return None, None
-
-
-def convert_assessment_to_dashboard_format(assessment: Dict) -> Dict:
-    """
-    Convert manual WAF assessment data to unified dashboard format
-    
-    Manual assessments have different structure than automated scans,
-    this function normalizes the data for dashboard consumption
-    """
-    
-    # Extract pillar scores from assessment
-    pillar_scores = assessment.get('pillar_scores', {})
-    
-    # Calculate overall score from pillar scores
-    if pillar_scores:
-        overall_score = sum(pillar_scores.values()) / len(pillar_scores)
-    else:
-        overall_score = 0
-    
-    # Extract findings/issues
-    findings = []
-    
-    # Check different possible keys for findings
-    for key in ['findings', 'issues', 'recommendations', 'gaps']:
-        if key in assessment and assessment[key]:
-            findings.extend(assessment[key] if isinstance(assessment[key], list) else [assessment[key]])
-    
-    # Count by severity
-    severity_counts = {
-        'critical': 0,
-        'high': 0,
-        'medium': 0,
-        'low': 0
-    }
-    
-    for finding in findings:
-        severity = finding.get('severity', finding.get('priority', 'medium')).lower()
-        if severity in severity_counts:
-            severity_counts[severity] += 1
-        elif 'critical' in severity or 'urgent' in severity:
-            severity_counts['critical'] += 1
-        elif 'high' in severity:
-            severity_counts['high'] += 1
-        elif 'low' in severity:
-            severity_counts['low'] += 1
-        else:
-            severity_counts['medium'] += 1
-    
-    # Create unified format
-    unified = {
-        'scan_id': assessment.get('assessment_id', f"assessment_{datetime.now().strftime('%Y%m%d_%H%M%S')}"),
-        'account_id': assessment.get('account_id', 'manual'),
-        'account_name': assessment.get('account_name', 'Manual Assessment'),
-        'scan_date': assessment.get('created_at', assessment.get('date', datetime.now())),
-        'scan_type': 'manual_assessment',
-        'total_findings': len(findings),
-        'critical_count': severity_counts['critical'],
-        'high_count': severity_counts['high'],
-        'medium_count': severity_counts['medium'],
-        'low_count': severity_counts['low'],
-        'overall_waf_score': overall_score,
-        'pillar_scores': pillar_scores,
-        'findings': findings,
-        'questions_answered': assessment.get('questions_answered', 0),
-        'total_questions': assessment.get('total_questions', 200),
-        'completion_percentage': assessment.get('completion_percentage', 0),
-        'data_source': 'Manual Assessment'
-    }
-    
-    return unified
-
-
-def get_latest_scan_from_firestore() -> Optional[Dict]:
-    """
-    Get the most recent scan from Firestore
-    Works with both automated scans and manual assessments
-    """
-    
-    if not hasattr(st.session_state, 'db') or not st.session_state.db:
-        return None
-    
-    db = st.session_state.db
-    if not hasattr(db, 'db') or not db.db:
-        return None
-    
-    try:
-        # Try to get latest WAF scan
-        scans = db.db.collection('waf_scans')\
-            .order_by('scan_date', direction='DESCENDING')\
-            .limit(1)\
-            .stream()
-        
-        for scan in scans:
-            scan_data = scan.to_dict()
-            
-            # Get findings for this scan
-            findings = []
-            findings_ref = db.db.collection('waf_findings')\
-                .where('scan_id', '==', scan_data.get('scan_id'))\
-                .stream()
-            
-            for finding in findings_ref:
-                findings.append(finding.to_dict())
-            
-            scan_data['findings'] = findings
-            scan_data['data_source'] = 'Firestore'
-            return scan_data
-        
-        # If no WAF scans, try manual assessments
-        assessments = db.db.collection('assessments')\
-            .order_by('created_at', direction='DESCENDING')\
-            .limit(1)\
-            .stream()
-        
-        for assessment in assessments:
-            assessment_data = assessment.to_dict()
-            return convert_assessment_to_dashboard_format(assessment_data)
-    
-    except Exception as e:
-        print(f"Error fetching from Firestore: {e}")
-        return None
-
-
-# ============================================================================
-# ✨ ENTERPRISE TABS
-# ============================================================================
-
-def render_enterprise_dashboard_tab():
-    """Enterprise Dashboard with Interactive Charts - Works with both automated scans and manual assessments"""
-    
-    st.header("📊 Executive Dashboard")
-    
-    if not ENTERPRISE_MODULES_AVAILABLE:
-        st.warning("⚠️ Enterprise modules not available")
-        st.info("Install dependencies: `pip install plotly pandas firebase-admin`")
-        st.info("See documentation: `FIRESTORE_INTEGRATION_GUIDE.md`")
-        return
-    
-    # ============================================================================
-    # ✨ UNIFIED DATA RETRIEVAL - Checks multiple sources
-    # ============================================================================
-    waf_data, data_source = get_waf_data()
-    
-    # If no data found, show helpful message
-    if not waf_data:
-        st.info("ℹ️ No WAF data available yet")
-        st.markdown("""
-        ### Get started by:
-        
-        **Option 1: Automated Scan**
-        👉 Go to the **🔍 WAF Scanner** tab and run an automated AWS scan
-        
-        **Option 2: Manual Assessment**  
-        👉 Go to the **⚡ WAF Assessment** tab and complete the 200+ question assessment
-        
-        Both methods will populate this dashboard with insights and metrics.
-        """)
-        return
-    
-    # Safe check for dashboard attribute
-    if not hasattr(st.session_state, 'dashboard') or not st.session_state.dashboard:
-        st.error("❌ Dashboard module not initialized")
-        st.info("Please ensure enterprise modules are installed: `pip install plotly pandas`")
-        return
-    
-    try:
-        dashboard = st.session_state.dashboard
-        
-        # Show data source
-        st.caption(f"📊 Data source: {data_source}")
-        
-        # Key Metrics
-        st.subheader("📊 Key Metrics")
-        col1, col2, col3, col4 = st.columns(4)
-        
-        with col1:
-            st.metric(
-                "Total Findings",
-                waf_data.get('total_findings', 0),
-                delta=None,
-                help="Total number of WAF findings across all pillars"
-            )
-        
-        with col2:
-            critical = waf_data.get('critical_count', 0)
-            st.metric(
-                "Critical",
-                critical,
-                delta=f"-{critical}" if critical > 0 else "0",
-                delta_color="inverse",
-                help="Critical severity findings requiring immediate action"
-            )
-        
-        with col3:
-            high = waf_data.get('high_count', 0)
-            st.metric(
-                "High",
-                high,
-                delta=f"-{high}" if high > 0 else "0",
-                delta_color="inverse",
-                help="High severity findings"
-            )
-        
-        with col4:
-            score = waf_data.get('overall_waf_score', 0)
-            st.metric(
-                "WAF Score",
-                f"{score:.0f}/100",
-                delta=f"{score-75:.0f}" if score >= 75 else f"{score-75:.0f}",
-                delta_color="normal",
-                help="Overall Well-Architected Framework score"
-            )
-        
-        st.markdown("---")
-        
-        # Interactive Charts
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.subheader("🎯 Severity Distribution")
-            fig = dashboard.create_severity_distribution_pie(waf_data.get('findings', []))
-            st.plotly_chart(fig, use_container_width=True)
-        
-        with col2:
-            st.subheader("⭐ WAF Pillar Scores")
-            fig = dashboard.create_pillar_radar_chart(waf_data.get('pillar_scores', {}))
-            st.plotly_chart(fig, use_container_width=True)
-        
-        # Service Breakdown
-        st.subheader("🔧 Findings by AWS Service")
-        fig = dashboard.create_service_breakdown_bar(waf_data.get('findings', []))
-        st.plotly_chart(fig, use_container_width=True)
-        
-        # Account Info
-        st.markdown("---")
-        st.caption(f"**Account:** {results.get('account_name', 'Unknown')} ({results.get('account_id', 'Unknown')})")
-        st.caption(f"**Scan Date:** {results.get('scan_date', datetime.now().strftime('%Y-%m-%d %H:%M:%S'))}")
-        
-    except Exception as e:
-        st.error(f"❌ Error rendering dashboard: {e}")
-        st.exception(e)
-
-
-def render_historical_trends_tab():
-    """Historical Trends & Analytics"""
-    
-    st.header("📈 Historical Trends & Analytics")
-    
-    if not ENTERPRISE_MODULES_AVAILABLE:
-        st.warning("⚠️ Historical tracking requires enterprise modules")
-        return
-    
-    # Safe check for db attribute
-    if not hasattr(st.session_state, 'db') or not st.session_state.db or not hasattr(st.session_state.db, 'db') or not st.session_state.db.db:
-        st.warning("⚠️ Historical tracking requires Firestore database")
-        st.info("""
-        **Setup Firestore for persistence:**
-        1. See `FIRESTORE_INTEGRATION_GUIDE.md` for complete setup
-        2. Your app already has Firebase - just extend it!
-        3. Configure Firebase secrets in Streamlit Cloud
-        """)
-        return
-    
-    db = st.session_state.db
-    
-    # Account selector
-    st.subheader("🔍 Select Account")
-    col1, col2 = st.columns([2, 1])
-    
-    with col1:
-        account_id = st.text_input(
-            "Account ID",
-            placeholder="123456789012",
-            help="Enter the AWS account ID to view trends"
-        )
-    
-    with col2:
-        days = st.slider(
-            "Time Period (days)",
-            min_value=7,
-            max_value=90,
-            value=30,
-            help="Number of days of history to show"
-        )
-    
-    if account_id:
-        if st.button("📊 Load Trends", type="primary"):
-            with st.spinner("Loading historical data..."):
-                try:
-                    # Get trend data
-                    trends = db.get_trend_data(account_id, days=days)
-                    
-                    if not trends.empty:
-                        st.success(f"✅ Found {len(trends)} historical scans")
-                        
-                        # Show trend chart (safe check for dashboard)
-                        st.subheader("📉 Trend Analysis")
-                        if hasattr(st.session_state, 'dashboard') and st.session_state.dashboard:
-                            dashboard = st.session_state.dashboard
-                            fig = dashboard.create_trend_chart(trends)
-                            st.plotly_chart(fig, use_container_width=True)
-                        else:
-                            st.warning("⚠️ Dashboard module not available for chart visualization")
-                        
-                        # Summary stats
-                        col1, col2, col3 = st.columns(3)
-                        col1.metric("Total Scans", len(trends))
-                        col2.metric("Avg WAF Score", f"{trends['overall_waf_score'].mean():.1f}")
-                        col3.metric("Avg Findings", f"{trends['total_findings'].mean():.0f}")
-                        
-                        # Show data table
-                        st.subheader("📋 Scan History")
-                        display_cols = ['scan_date', 'total_findings', 'critical_count', 
-                                      'high_count', 'medium_count', 'overall_waf_score']
-                        st.dataframe(
-                            trends[display_cols],
-                            use_container_width=True,
-                            hide_index=True
-                        )
-                    else:
-                        st.info("ℹ️ No historical data found for this account")
-                        st.markdown("Run some scans to build up historical data!")
-                        
-                except Exception as e:
-                    st.error(f"❌ Error loading trends: {e}")
-                    st.exception(e)
-
-
-def render_cost_impact_tab():
-    """Cost Impact Analysis - Works with both automated scans and manual assessments"""
-    
-    st.header("💰 Cost Impact Analysis")
-    
-    if not ENTERPRISE_MODULES_AVAILABLE:
-        st.warning("⚠️ Cost analysis requires enterprise modules")
-        return
-    
-    # Get WAF data from any source
-    waf_data, data_source = get_waf_data()
-    
-    if not waf_data:
-        st.info("ℹ️ No WAF data available for cost analysis")
-        st.markdown("""
-        ### Get started by:
-        
-        **Option 1: Automated Scan**
-        👉 Go to the **🔍 WAF Scanner** tab and run an automated AWS scan
-        
-        **Option 2: Manual Assessment**  
-        👉 Go to the **⚡ WAF Assessment** tab and complete the 200+ question assessment
-        
-        Both methods will populate this cost analysis with insights.
-        """)
-        return
-    
-    # Safe check for cost_calculator attribute
-    if not hasattr(st.session_state, 'cost_calculator') or not st.session_state.cost_calculator:
-        st.error("❌ Cost calculator module not initialized")
-        st.info("Please ensure enterprise modules are installed")
-        return
-    
-    # Safe check for dashboard attribute (needed for charts)
-    if not hasattr(st.session_state, 'dashboard') or not st.session_state.dashboard:
-        st.error("❌ Dashboard module not initialized")
-        st.info("Please ensure enterprise modules are installed")
-        return
-    
-    try:
-        # Show data source
-        st.caption(f"📊 Data source: {data_source}")
-        
-        cost_calculator = st.session_state.cost_calculator
-        findings = waf_data.get('findings', [])
-        
-        # Calculate portfolio impact
-        with st.spinner("Calculating cost impact..."):
-            portfolio_cost = cost_calculator.calculate_portfolio_impact(findings)
-        
-        # Key Metrics
-        st.subheader("💵 Financial Impact Summary")
-        col1, col2, col3, col4 = st.columns(4)
-        
-        with col1:
-            st.metric(
-                "Monthly Waste",
-                f"${portfolio_cost['total_monthly_waste']:,.0f}",
-                help="Estimated monthly cost waste from inefficiencies"
-            )
-        
-        with col2:
-            st.metric(
-                "Annual Waste",
-                f"${portfolio_cost['total_annual_waste']:,.0f}",
-                delta=f"-${portfolio_cost['total_annual_waste']:,.0f}",
-                delta_color="inverse",
-                help="Projected annual cost waste"
-            )
-        
-        with col3:
-            st.metric(
-                "Risk Exposure",
-                f"${portfolio_cost['total_risk_exposure']:,.0f}",
-                help="Potential financial impact of security risks"
-            )
-        
-        with col4:
-            st.metric(
-                "Total Impact",
-                f"${portfolio_cost['total_impact']:,.0f}",
-                delta=f"-${portfolio_cost['total_impact']:,.0f}",
-                delta_color="inverse",
-                help="Total financial impact (waste + risk)"
-            )
-        
-        st.markdown("---")
-        
-        # Cost breakdown chart
-        st.subheader("📊 Cost Impact Breakdown")
-        dashboard = st.session_state.dashboard
-        fig = dashboard.create_cost_impact_waterfall(portfolio_cost)
-        st.plotly_chart(fig, use_container_width=True)
-        
-        # Top opportunities
-        st.subheader("💡 Top Cost Savings Opportunities")
-        
-        opportunities = portfolio_cost.get('top_opportunities', [])[:5]
-        
-        if opportunities:
-            for i, opp in enumerate(opportunities, 1):
-                with st.expander(
-                    f"**#{i} - {opp['title']}** • Total Impact: ${opp['total_impact']:,.0f}",
-                    expanded=(i == 1)
-                ):
-                    col1, col2, col3 = st.columns(3)
-                    
-                    with col1:
-                        st.metric("Monthly Waste", f"${opp['monthly_waste']:,.2f}")
-                    
-                    with col2:
-                        st.metric("Annual Waste", f"${opp['annual_waste']:,.2f}")
-                    
-                    with col3:
-                        st.metric("Risk Cost", f"${opp['risk_cost']:,.0f}")
-                    
-                    if opp.get('recommendations'):
-                        st.markdown("**🎯 Recommendations:**")
-                        for rec in opp['recommendations']:
-                            st.markdown(f"- {rec}")
-        else:
-            st.info("No cost optimization opportunities identified")
-        
-    except Exception as e:
-        st.error(f"❌ Error calculating costs: {e}")
-        st.exception(e)
-
-
-def render_remediation_tab():
-    """Automated Remediation Code Generation - Works with both automated scans and manual assessments"""
-    
-    st.header("🔧 Automated Remediation")
-    
-    if not ENTERPRISE_MODULES_AVAILABLE:
-        st.warning("⚠️ Remediation engine requires enterprise modules")
-        return
-    
-    # Get WAF data from any source
-    waf_data, data_source = get_waf_data()
-    
-    if not waf_data:
-        st.info("ℹ️ No WAF data available for remediation")
-        st.markdown("""
-        ### Get started by:
-        
-        **Option 1: Automated Scan**
-        👉 Go to the **🔍 WAF Scanner** tab and run an automated AWS scan
-        
-        **Option 2: Manual Assessment**  
-        👉 Go to the **⚡ WAF Assessment** tab and complete the 200+ question assessment
-        
-        Both methods will identify findings that can be remediated.
-        """)
-        return
-    
-    findings = waf_data.get('findings', [])
-    
-    if not findings:
-        st.info("ℹ️ No findings to remediate")
-        return
-    
-    # Safe check for remediation attribute
-    if not hasattr(st.session_state, 'remediation') or not st.session_state.remediation:
-        st.error("❌ Remediation engine not initialized")
-        st.info("Please ensure enterprise modules are installed")
-        return
-    
-    # Show data source
-    st.caption(f"📊 Data source: {data_source}")
-    
-    # Finding selector
-    st.subheader("🔍 Select Finding")
-    finding_titles = [
-        f"{f.get('severity', 'MEDIUM')} - {f.get('service', 'Unknown')} - {f.get('title', 'Unknown')}" 
-        for f in findings
-    ]
-    
-    selected = st.selectbox(
-        "Choose a finding to see remediation options",
-        finding_titles,
-        help="Select from findings discovered in your last scan"
-    )
-    
-    if selected:
-        idx = finding_titles.index(selected)
-        finding = findings[idx]
-        
-        # Show finding details
-        with st.expander("📋 Finding Details", expanded=True):
-            col1, col2, col3 = st.columns(3)
-            col1.write(f"**Severity:** {finding.get('severity', 'Unknown')}")
-            col2.write(f"**Service:** {finding.get('service', 'Unknown')}")
-            col3.write(f"**Pillar:** {finding.get('pillar', 'Unknown')}")
-            st.write(f"**Description:** {finding.get('description', 'No description available')}")
-        
-        # Get remediation options
-        remediation = st.session_state.remediation
-        
-        with st.spinner("Generating remediation code..."):
-            options = remediation.get_remediation_options(finding)
-        
-        if options:
-            st.markdown("---")
-            st.subheader("⚡ Remediation Options")
-            
-            # Display tabs with different formats
-            tab1, tab2, tab3, tab4 = st.tabs([
-                "🏗️ Terraform",
-                "☁️ CloudFormation",
-                "⌨️ AWS CLI",
-                "📝 Manual Steps"
-            ])
-            
-            with tab1:
-                if options.get('terraform'):
-                    st.markdown("**Terraform Configuration:**")
-                    st.code(options['terraform'], language='hcl')
-                    st.download_button(
-                        "📥 Download Terraform",
-                        options['terraform'],
-                        file_name=f"remediation_{finding.get('service', 'resource')}.tf",
-                        mime="text/plain"
-                    )
-                else:
-                    st.info("💡 No Terraform code available for this finding")
-            
-            with tab2:
-                if options.get('cloudformation'):
-                    st.markdown("**CloudFormation Template:**")
-                    st.code(options['cloudformation'], language='json')
-                    st.download_button(
-                        "📥 Download CloudFormation",
-                        options['cloudformation'],
-                        file_name=f"remediation_{finding.get('service', 'resource')}.json",
-                        mime="application/json"
-                    )
-                else:
-                    st.info("💡 No CloudFormation template available")
-            
-            with tab3:
-                if options.get('aws_cli'):
-                    st.markdown("**AWS CLI Commands:**")
-                    cli_commands = '\n'.join(options['aws_cli'])
-                    st.code(cli_commands, language='bash')
-                    st.download_button(
-                        "📥 Download Script",
-                        cli_commands,
-                        file_name=f"remediation_{finding.get('service', 'resource')}.sh",
-                        mime="text/plain"
-                    )
-                else:
-                    st.info("💡 No CLI commands available")
-            
-            with tab4:
-                if options.get('manual_steps'):
-                    st.markdown("### 📝 Manual Remediation Steps")
-                    for i, step in enumerate(options['manual_steps'], 1):
-                        st.markdown(f"{i}. {step}")
-                else:
-                    st.info("💡 No manual steps available")
-        else:
-            st.warning("⚠️ No remediation options available for this finding")
-            st.info("This may be a finding that requires manual review or is not yet supported by the remediation engine.")
-
-# ============================================================================
 # MAIN TABS
 # ============================================================================
 
 def render_main_content():
     """Render main content area with tabs"""
     
-    # ✨ ENTERPRISE: Extended from 6 to 10 tabs
+    # Create tabs - 6 focused tabs
     tabs = st.tabs([
         "🔍 WAF Scanner",
         "☁️ AWS Connector",
         "⚡ WAF Assessment",
         "🎨 Architecture Designer",
         "🚀 EKS Modernization",
-        "🔒 Compliance",
-        "📊 Dashboard",         # ✨ NEW
-        "📈 Historical Trends", # ✨ NEW
-        "💰 Cost Impact",       # ✨ NEW
-        "🔧 Remediation"        # ✨ NEW
+        "🔒 Compliance"
     ])
     
     # Tab 1: WAF Scanner
@@ -3133,26 +2733,6 @@ def render_main_content():
                 st.error(f"Error loading Compliance: {str(e)}")
         else:
             st.warning("Compliance module not available")
-    
-    # ============================================================================
-    # ✨ ENTERPRISE TABS
-    # ============================================================================
-    
-    # Tab 7: Dashboard
-    with tabs[6]:
-        render_enterprise_dashboard_tab()
-    
-    # Tab 8: Historical Trends
-    with tabs[7]:
-        render_historical_trends_tab()
-    
-    # Tab 9: Cost Impact
-    with tabs[8]:
-        render_cost_impact_tab()
-    
-    # Tab 10: Remediation
-    with tabs[9]:
-        render_remediation_tab()
 
 # ============================================================================
 # MAIN APPLICATION
