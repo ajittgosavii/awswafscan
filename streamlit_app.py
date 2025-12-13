@@ -1188,6 +1188,74 @@ def render_waf_scanner_tab():
             except Exception as e:
                 st.warning(f"⚠️ Could not apply all enterprise features: {e}")
 
+def render_waf_scanner_tab():
+    """WAF Scanner with forced result storage"""
+    
+    # Render the scanner
+    render_integrated_waf_scanner()
+    
+    # ============================================================================
+    # 🔧 FORCE STORE SCAN RESULTS (even if 0 findings)
+    # ============================================================================
+    
+    # Check if scan just completed
+    if st.session_state.get('scan_completed', False):
+        
+        # Get scan results from any available key
+        scan_results = None
+        
+        # Try different keys
+        for key in ['scan_results', 'waf_scan_results', 'latest_scan', 'current_scan_results']:
+            if hasattr(st.session_state, key):
+                temp_results = getattr(st.session_state, key)
+                if temp_results and isinstance(temp_results, dict):
+                    scan_results = temp_results
+                    break
+        
+        # If we found results, ensure they're stored properly
+        if scan_results:
+            # CRITICAL: Always store as last_scan_results
+            st.session_state.last_scan_results = scan_results
+            
+            # Ensure minimum required fields exist
+            if 'total_findings' not in scan_results:
+                scan_results['total_findings'] = len(scan_results.get('findings', []))
+            
+            if 'overall_waf_score' not in scan_results:
+                # Calculate score from pillar scores if available
+                pillar_scores = scan_results.get('pillar_scores', {})
+                if pillar_scores:
+                    scan_results['overall_waf_score'] = sum(pillar_scores.values()) / len(pillar_scores)
+                else:
+                    # If no findings, give a perfect score
+                    scan_results['overall_waf_score'] = 100
+            
+            # Add severity counts if missing
+            if 'critical_count' not in scan_results:
+                findings = scan_results.get('findings', [])
+                scan_results['critical_count'] = sum(1 for f in findings if f.get('severity', '').upper() == 'CRITICAL')
+                scan_results['high_count'] = sum(1 for f in findings if f.get('severity', '').upper() == 'HIGH')
+                scan_results['medium_count'] = sum(1 for f in findings if f.get('severity', '').upper() == 'MEDIUM')
+                scan_results['low_count'] = sum(1 for f in findings if f.get('severity', '').upper() == 'LOW')
+            
+            # Show confirmation
+            st.success(f"✅ Scan results stored! Total findings: {scan_results['total_findings']}")
+            
+            # Store in Firestore if available
+            if ENTERPRISE_MODULES_AVAILABLE and hasattr(st.session_state, 'db'):
+                if st.session_state.db and hasattr(st.session_state.db, 'is_connected'):
+                    if st.session_state.db.is_connected():
+                        try:
+                            scan_id = st.session_state.db.store_scan(scan_results)
+                            if scan_id:
+                                st.info(f"📊 Also stored in Firestore: {scan_id}")
+                        except Exception as e:
+                            st.warning(f"⚠️ Firestore storage failed: {e}")
+        else:
+            # No scan results found
+            st.warning("⚠️ Scan completed but no results found in session state")
+            st.info("This might be normal if scan is still in progress")
+
 def render_single_account_scanner():
     """Single account WAF scanner - DEPRECATED
     
