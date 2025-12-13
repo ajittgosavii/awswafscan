@@ -14,15 +14,46 @@ class WAFDatabaseFirestore:
     def __init__(self):
         """Initialize using existing Firebase connection"""
         self.db = None
-        
-        # Use your existing Firebase initialization
-        if st.session_state.get('firebase_initialized', False):
-            try:
+        self._initialize_connection()
+    
+    def _initialize_connection(self):
+        """Attempt to connect to existing Firestore"""
+        try:
+            # Method 1: Check if Firebase is already initialized via firebase_auth_module
+            if st.session_state.get('firebase_initialized', False):
                 from firebase_auth_module import firebase_manager
-                self.db = firebase_manager.db
-                print("✅ Connected to existing Firestore")
-            except Exception as e:
-                print(f"⚠️ Firestore connection failed: {e}")
+                if firebase_manager and firebase_manager.db:
+                    self.db = firebase_manager.db
+                    print("✅ Connected to existing Firestore via firebase_manager")
+                    return
+            
+            # Method 2: Try to initialize Firebase from Streamlit secrets
+            if 'firebase' in st.secrets:
+                try:
+                    import firebase_admin
+                    from firebase_admin import credentials, firestore
+                    
+                    # Check if Firebase is already initialized
+                    if not firebase_admin._apps:
+                        cred = credentials.Certificate(dict(st.secrets['firebase']))
+                        firebase_admin.initialize_app(cred)
+                    
+                    self.db = firestore.client()
+                    print("✅ Connected to Firestore from secrets")
+                    return
+                    
+                except Exception as e:
+                    print(f"⚠️ Firestore initialization from secrets failed: {e}")
+            
+            print("⚠️ Firestore not available. Historical tracking disabled.")
+            
+        except Exception as e:
+            print(f"⚠️ Firestore connection failed: {e}")
+            self.db = None
+    
+    def is_connected(self) -> bool:
+        """Check if database is connected"""
+        return self.db is not None
     
     def store_scan(self, scan_result: Dict) -> str:
         """Store WAF scan in Firestore"""
@@ -58,6 +89,7 @@ class WAFDatabaseFirestore:
             self.db.collection('waf_scans').document(scan_id).set(scan_doc)
             
             # Store findings
+            findings_count = 0
             for finding in scan_result.get('findings', []):
                 finding_id = finding.get('finding_id', f"{scan_id}_{finding.get('title', 'unknown')}")
                 
@@ -77,20 +109,27 @@ class WAFDatabaseFirestore:
                     'created_at': datetime.now()
                 }
                 
+                # Check if finding already exists
                 existing = self.db.collection('waf_findings').document(finding_id).get()
                 if existing.exists:
+                    # Update last_seen
                     self.db.collection('waf_findings').document(finding_id).update({
                         'last_seen': datetime.now(),
                         'updated_at': datetime.now()
                     })
                 else:
+                    # Create new finding
                     self.db.collection('waf_findings').document(finding_id).set(finding_doc)
+                
+                findings_count += 1
             
-            print(f"✅ Scan {scan_id} stored in Firestore")
+            print(f"✅ Scan {scan_id} stored in Firestore ({findings_count} findings)")
             return scan_id
             
         except Exception as e:
             print(f"❌ Error storing scan: {e}")
+            import traceback
+            traceback.print_exc()
             return 'error'
     
     def get_trend_data(self, account_id: str, days: int = 30) -> pd.DataFrame:
@@ -101,20 +140,26 @@ class WAFDatabaseFirestore:
         try:
             scans_ref = self.db.collection('waf_scans')\
                 .where('account_id', '==', account_id)\
-                .order_by('scan_date', direction='DESCENDING')\
+                .order_by('scan_date', direction=firestore.Query.DESCENDING)\
                 .limit(100)
             
             scans = scans_ref.stream()
             data = []
             for scan in scans:
                 scan_dict = scan.to_dict()
-                if 'scan_date' in scan_dict:
+                # Convert Firestore timestamp to string
+                if 'scan_date' in scan_dict and hasattr(scan_dict['scan_date'], 'strftime'):
                     scan_dict['scan_date'] = scan_dict['scan_date'].strftime('%Y-%m-%d %H:%M:%S')
+                elif 'scan_date' in scan_dict and isinstance(scan_dict['scan_date'], str):
+                    # Already a string, keep as is
+                    pass
                 data.append(scan_dict)
             
             return pd.DataFrame(data)
         except Exception as e:
             print(f"❌ Error getting trends: {e}")
+            import traceback
+            traceback.print_exc()
             return pd.DataFrame()
     
     def get_summary_stats(self, account_id: Optional[str] = None) -> Dict:
@@ -202,7 +247,7 @@ class WAFDatabaseFirestore:
         try:
             comments_ref = self.db.collection('waf_comments')\
                 .where('finding_id', '==', finding_id)\
-                .order_by('created_at', direction='DESCENDING')
+                .order_by('created_at', direction=firestore.Query.DESCENDING)
             
             comments = []
             for comment in comments_ref.stream():
