@@ -9,6 +9,9 @@ RECENT UPDATES:
 - Professional PDF report generation
 - Complete WAF framework mapping (all 6 pillars)
 - Demo/Live mode toggle for demonstrations
+- SSO Authentication with Firebase
+- Role-Based Access Control (RBAC)
+- Admin Panel for user management
 """
 
 import streamlit as st
@@ -25,6 +28,22 @@ from demo_mode_manager import (
     render_mode_banner,
     render_demo_account_info
 )
+
+# Import SSO & Admin Manager
+try:
+    from sso_admin_manager import (
+        SessionManager,
+        get_auth_manager,
+        render_login_page,
+        render_user_menu,
+        render_admin_panel,
+        check_tab_access,
+        UserRole,
+    )
+    SSO_AVAILABLE = True
+except Exception as e:
+    SSO_AVAILABLE = False
+    print(f"SSO module not available: {e}")
 
 
 # Page configuration
@@ -155,6 +174,52 @@ def render_sidebar():
     demo_mgr = get_demo_manager()
     
     with st.sidebar:
+        # ====== USER AUTHENTICATION STATUS ======
+        if SSO_AVAILABLE:
+            if SessionManager.is_authenticated():
+                user = SessionManager.get_current_user()
+                if user:
+                    st.markdown("### 👤 Account")
+                    
+                    role_colors = {
+                        UserRole.SUPER_ADMIN: "#ff4444",
+                        UserRole.ADMIN: "#ff9900",
+                        UserRole.MANAGER: "#ffcc00",
+                        UserRole.USER: "#44bb44",
+                        UserRole.VIEWER: "#4488ff",
+                        UserRole.GUEST: "#888888",
+                    }
+                    
+                    role_color = role_colors.get(user.role, "#888888")
+                    
+                    st.markdown(f"""
+                    <div style="padding: 10px; background: linear-gradient(135deg, {role_color}22, {role_color}44); 
+                                border-radius: 8px; border: 1px solid {role_color}; margin-bottom: 10px;">
+                        <div style="font-weight: bold; color: white;">{user.display_name}</div>
+                        <div style="font-size: 12px; color: {role_color};">{user.role.name.replace('_', ' ').title()}</div>
+                        <div style="font-size: 11px; color: #888;">{user.email}</div>
+                    </div>
+                    """, unsafe_allow_html=True)
+                    
+                    col_a, col_b = st.columns(2)
+                    with col_a:
+                        if user.role in [UserRole.ADMIN, UserRole.SUPER_ADMIN]:
+                            if st.button("⚙️ Admin", use_container_width=True, key="sidebar_admin"):
+                                st.session_state.show_admin_panel = True
+                                st.rerun()
+                    with col_b:
+                        if st.button("🚪 Logout", use_container_width=True, key="sidebar_logout"):
+                            SessionManager.logout()
+                            st.rerun()
+                    
+                    st.markdown("---")
+            else:
+                st.markdown("### 🔐 Authentication")
+                if st.button("🔑 Sign In", use_container_width=True, type="primary"):
+                    st.session_state.show_login = True
+                    st.rerun()
+                st.markdown("---")
+        
         # ====== MODE TOGGLE (Top Priority) ======
         st.markdown("### 🎮 Mode Selection")
         
@@ -2703,8 +2768,8 @@ def display_multi_account_results(results):
 def render_main_content():
     """Render main content area with tabs"""
     
-    # Create tabs - 8 enterprise tabs
-    tabs = st.tabs([
+    # Determine which tabs to show based on user role
+    base_tabs = [
         "🔍 WAF Scanner",
         "☁️ AWS Connector",
         "⚡ WAF Assessment",
@@ -2713,7 +2778,18 @@ def render_main_content():
         "🚀 EKS Modernization",
         "🔒 Compliance",
         "🤖 AI Assistant"
-    ])
+    ]
+    
+    # Add Admin Panel if user is admin
+    show_admin_tab = False
+    if SSO_AVAILABLE and SessionManager.is_authenticated():
+        user = SessionManager.get_current_user()
+        if user and user.role in [UserRole.ADMIN, UserRole.SUPER_ADMIN]:
+            base_tabs.append("⚙️ Admin Panel")
+            show_admin_tab = True
+    
+    # Create tabs
+    tabs = st.tabs(base_tabs)
     
     # Tab 1: WAF Scanner
     with tabs[0]:
@@ -2799,17 +2875,95 @@ def render_main_content():
         else:
             st.warning("AI Assistant module not available")
             st.info("AI-powered assistance requires the AI Assistant module and Anthropic API key.")
+    
+    # Tab 9: Admin Panel (only for admins)
+    if show_admin_tab and len(tabs) > 8:
+        with tabs[8]:
+            if SSO_AVAILABLE:
+                render_admin_panel()
+            else:
+                st.error("Admin Panel requires SSO module")
 
 # ============================================================================
 # MAIN APPLICATION
 # ============================================================================
 
 def main():
-    """Main application"""
+    """Main application with optional authentication"""
     
+    # Check if authentication is required
+    auth_required = st.session_state.get('auth_required', False)
+    
+    # Try to get auth setting from secrets
+    try:
+        if hasattr(st, 'secrets') and 'app' in st.secrets:
+            auth_required = st.secrets['app'].get('require_auth', False)
+    except:
+        pass
+    
+    if SSO_AVAILABLE and auth_required:
+        # Authentication required
+        if not SessionManager.is_authenticated():
+            render_login_page()
+            return
+        
+        # Render user menu in sidebar
+        render_user_menu()
+        
+        # Check for admin panel request
+        if st.session_state.get('show_admin_panel', False):
+            render_admin_panel()
+            if st.button("← Back to Application", type="primary"):
+                st.session_state.show_admin_panel = False
+                st.rerun()
+            return
+    
+    # Render main app
     render_header()
     render_sidebar()
     render_main_content()
 
+
+def main_with_auth():
+    """Main application WITH required authentication"""
+    
+    if not SSO_AVAILABLE:
+        st.error("SSO module not available. Please check installation.")
+        return
+    
+    # Authentication required
+    if not SessionManager.is_authenticated():
+        render_login_page()
+        return
+    
+    # Render user menu in sidebar
+    render_user_menu()
+    
+    # Check for admin panel request
+    if st.session_state.get('show_admin_panel', False):
+        render_admin_panel()
+        if st.button("← Back to Application", type="primary"):
+            st.session_state.show_admin_panel = False
+            st.rerun()
+        return
+    
+    # Render main app
+    render_header()
+    render_sidebar()
+    render_main_content()
+
+
 if __name__ == "__main__":
-    main()
+    # Check environment variable or secrets for auth mode
+    require_auth = False
+    
+    try:
+        if hasattr(st, 'secrets') and 'app' in st.secrets:
+            require_auth = st.secrets['app'].get('require_auth', False)
+    except:
+        pass
+    
+    if require_auth and SSO_AVAILABLE:
+        main_with_auth()
+    else:
+        main()
