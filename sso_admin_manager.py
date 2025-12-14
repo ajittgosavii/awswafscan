@@ -584,21 +584,9 @@ class SessionManager:
 class SSOAuthManager:
     """Main SSO Authentication Manager"""
     
-    _instance = None
-    
-    def __new__(cls):
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-            cls._instance._initialized = False
-        return cls._instance
-    
     def __init__(self):
-        if self._initialized:
-            return
-        
         self.firebase_available = False
         self.local_store = LocalUserStore()
-        self._initialized = True
         
         # Try to initialize Firebase
         self._try_init_firebase()
@@ -815,9 +803,18 @@ class SSOAuthManager:
 
 def get_auth_manager() -> SSOAuthManager:
     """Get the global auth manager instance"""
+    # Always create fresh instance to avoid stale state issues
     if 'auth_manager' not in st.session_state:
         st.session_state.auth_manager = SSOAuthManager()
-    return st.session_state.auth_manager
+    
+    # Verify the auth manager is properly initialized
+    auth_mgr = st.session_state.auth_manager
+    if not hasattr(auth_mgr, 'local_store') or auth_mgr.local_store is None:
+        # Reinitialize if local_store is missing
+        st.session_state.auth_manager = SSOAuthManager()
+        auth_mgr = st.session_state.auth_manager
+    
+    return auth_mgr
 
 
 # ============================================================================
@@ -950,8 +947,15 @@ def render_login_page():
     """Render the full-screen professional login page with Infosys branding"""
     
     # Check if initial setup is needed
-    auth_mgr = get_auth_manager()
-    if not auth_mgr.local_store.has_users() and not auth_mgr.firebase_available:
+    try:
+        auth_mgr = get_auth_manager()
+        needs_setup = not auth_mgr.local_store.has_users() and not auth_mgr.firebase_available
+    except Exception as e:
+        # If there's any error, assume we need setup
+        needs_setup = True
+        auth_mgr = None
+    
+    if needs_setup:
         render_initial_setup_page()
         return
     
