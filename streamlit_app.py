@@ -174,53 +174,46 @@ def render_sidebar():
     demo_mgr = get_demo_manager()
     
     with st.sidebar:
-        # ====== USER AUTHENTICATION STATUS ======
-        if SSO_AVAILABLE:
-            if SessionManager.is_authenticated():
-                user = SessionManager.get_current_user()
-                if user:
-                    st.markdown("### 👤 Account")
-                    
-                    role_colors = {
-                        UserRole.SUPER_ADMIN: "#ff4444",
-                        UserRole.ADMIN: "#ff9900",
-                        UserRole.MANAGER: "#ffcc00",
-                        UserRole.USER: "#44bb44",
-                        UserRole.VIEWER: "#4488ff",
-                        UserRole.GUEST: "#888888",
-                    }
-                    
-                    role_color = role_colors.get(user.role, "#888888")
-                    
-                    st.markdown(f"""
-                    <div style="padding: 10px; background: linear-gradient(135deg, {role_color}22, {role_color}44); 
-                                border-radius: 8px; border: 1px solid {role_color}; margin-bottom: 10px;">
-                        <div style="font-weight: bold; color: white;">{user.display_name}</div>
-                        <div style="font-size: 12px; color: {role_color};">{user.role.name.replace('_', ' ').title()}</div>
-                        <div style="font-size: 11px; color: #888;">{user.email}</div>
-                    </div>
-                    """, unsafe_allow_html=True)
-                    
-                    col_a, col_b = st.columns(2)
-                    with col_a:
-                        if user.role in [UserRole.ADMIN, UserRole.SUPER_ADMIN]:
-                            if st.button("⚙️ Admin", use_container_width=True, key="sidebar_admin"):
-                                st.session_state.show_admin_panel = True
-                                st.rerun()
-                    with col_b:
-                        if st.button("🚪 Logout", use_container_width=True, key="sidebar_logout"):
-                            SessionManager.logout()
+        # ====== USER INFO (Only shown when authenticated) ======
+        if SSO_AVAILABLE and SessionManager.is_authenticated():
+            user = SessionManager.get_current_user()
+            if user:
+                st.markdown("### 👤 Logged In As")
+                
+                role_colors = {
+                    UserRole.SUPER_ADMIN: "#ff4444",
+                    UserRole.ADMIN: "#ff9900",
+                    UserRole.MANAGER: "#ffcc00",
+                    UserRole.USER: "#44bb44",
+                    UserRole.VIEWER: "#4488ff",
+                    UserRole.GUEST: "#888888",
+                }
+                
+                role_color = role_colors.get(user.role, "#888888")
+                
+                st.markdown(f"""
+                <div style="padding: 12px; background: linear-gradient(135deg, {role_color}22, {role_color}44); 
+                            border-radius: 10px; border: 1px solid {role_color}; margin-bottom: 15px;">
+                    <div style="font-weight: bold; color: white; font-size: 16px;">{user.display_name}</div>
+                    <div style="font-size: 13px; color: {role_color}; margin: 3px 0;">🏷️ {user.role.name.replace('_', ' ').title()}</div>
+                    <div style="font-size: 11px; color: #aaa;">{user.email}</div>
+                </div>
+                """, unsafe_allow_html=True)
+                
+                col_a, col_b = st.columns(2)
+                with col_a:
+                    if user.role in [UserRole.ADMIN, UserRole.SUPER_ADMIN]:
+                        if st.button("⚙️ Admin", use_container_width=True, key="sidebar_admin_btn"):
+                            st.session_state.show_admin_panel = True
                             st.rerun()
-                    
-                    st.markdown("---")
-            else:
-                st.markdown("### 🔐 Authentication")
-                if st.button("🔑 Sign In", use_container_width=True, type="primary"):
-                    st.session_state.show_login = True
-                    st.rerun()
+                with col_b:
+                    if st.button("🚪 Logout", use_container_width=True, key="sidebar_logout_btn"):
+                        SessionManager.logout()
+                        st.rerun()
+                
                 st.markdown("---")
         
-        # ====== MODE TOGGLE (Top Priority) ======
+        # ====== MODE TOGGLE ======
         st.markdown("### 🎮 Mode Selection")
         
         col1, col2 = st.columns([1, 1])
@@ -2889,81 +2882,40 @@ def render_main_content():
 # ============================================================================
 
 def main():
-    """Main application with optional authentication"""
+    """Main application - ALWAYS requires authentication first"""
     
-    # Check if authentication is required
-    auth_required = st.session_state.get('auth_required', False)
+    # =========================================================================
+    # STEP 1: AUTHENTICATION CHECK (MANDATORY)
+    # =========================================================================
     
-    # Try to get auth setting from secrets
-    try:
-        if hasattr(st, 'secrets') and 'app' in st.secrets:
-            auth_required = st.secrets['app'].get('require_auth', False)
-    except:
-        pass
-    
-    if SSO_AVAILABLE and auth_required:
-        # Authentication required
+    if SSO_AVAILABLE:
+        # Check if user is authenticated
         if not SessionManager.is_authenticated():
+            # Show ONLY the login page - nothing else
             render_login_page()
-            return
+            return  # Stop here - don't render anything else
         
-        # Render user menu in sidebar
-        render_user_menu()
-        
-        # Check for admin panel request
+        # User is authenticated - check for admin panel
         if st.session_state.get('show_admin_panel', False):
             render_admin_panel()
             if st.button("← Back to Application", type="primary"):
                 st.session_state.show_admin_panel = False
                 st.rerun()
             return
-    
-    # Render main app
-    render_header()
-    render_sidebar()
-    render_main_content()
-
-
-def main_with_auth():
-    """Main application WITH required authentication"""
-    
-    if not SSO_AVAILABLE:
-        st.error("SSO module not available. Please check installation.")
+    else:
+        # SSO module not available - show error and login
+        st.error("🔐 Authentication module not loaded properly")
+        st.info("Please ensure the SSO module is properly installed.")
         return
     
-    # Authentication required
-    if not SessionManager.is_authenticated():
-        render_login_page()
-        return
+    # =========================================================================
+    # STEP 2: RENDER MAIN APPLICATION (Only for authenticated users)
+    # =========================================================================
     
-    # Render user menu in sidebar
-    render_user_menu()
-    
-    # Check for admin panel request
-    if st.session_state.get('show_admin_panel', False):
-        render_admin_panel()
-        if st.button("← Back to Application", type="primary"):
-            st.session_state.show_admin_panel = False
-            st.rerun()
-        return
-    
-    # Render main app
     render_header()
     render_sidebar()
     render_main_content()
 
 
 if __name__ == "__main__":
-    # Check environment variable or secrets for auth mode
-    require_auth = False
-    
-    try:
-        if hasattr(st, 'secrets') and 'app' in st.secrets:
-            require_auth = st.secrets['app'].get('require_auth', False)
-    except:
-        pass
-    
-    if require_auth and SSO_AVAILABLE:
-        main_with_auth()
-    else:
-        main()
+    main()

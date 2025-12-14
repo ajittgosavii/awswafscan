@@ -778,93 +778,229 @@ def get_auth_manager() -> SSOAuthManager:
 # ============================================================================
 
 def render_login_page():
-    """Render the login page"""
+    """Render the full-screen login page"""
     
+    # Custom CSS for full-screen login
     st.markdown("""
     <style>
-    .login-container {
-        max-width: 400px;
-        margin: 50px auto;
-        padding: 30px;
-        background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
-        border-radius: 15px;
-        border: 1px solid #FF9900;
-        box-shadow: 0 10px 40px rgba(255, 153, 0, 0.2);
+    /* Hide sidebar completely on login page */
+    [data-testid="stSidebar"] {
+        display: none !important;
     }
+    
+    /* Center the login form */
+    .login-wrapper {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        min-height: 80vh;
+    }
+    
+    .login-container {
+        max-width: 450px;
+        width: 100%;
+        padding: 40px;
+        background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+        border-radius: 20px;
+        border: 2px solid #FF9900;
+        box-shadow: 0 20px 60px rgba(255, 153, 0, 0.3);
+    }
+    
     .login-header {
         text-align: center;
         margin-bottom: 30px;
     }
-    .login-header h1 {
-        color: #FF9900;
-        font-size: 28px;
+    
+    .login-logo {
+        font-size: 60px;
         margin-bottom: 10px;
     }
-    .login-header p {
+    
+    .login-title {
+        color: #FF9900;
+        font-size: 28px;
+        font-weight: bold;
+        margin-bottom: 5px;
+    }
+    
+    .login-subtitle {
         color: #888;
         font-size: 14px;
+    }
+    
+    .login-footer {
+        text-align: center;
+        margin-top: 20px;
+        padding-top: 20px;
+        border-top: 1px solid #333;
+    }
+    
+    .feature-list {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 15px;
+        margin-top: 30px;
+    }
+    
+    .feature-item {
+        background: rgba(255, 153, 0, 0.1);
+        padding: 15px;
+        border-radius: 10px;
+        text-align: center;
+    }
+    
+    .feature-icon {
+        font-size: 24px;
+        margin-bottom: 5px;
+    }
+    
+    .feature-text {
+        font-size: 12px;
+        color: #ccc;
     }
     </style>
     """, unsafe_allow_html=True)
     
+    # Create centered layout
     col1, col2, col3 = st.columns([1, 2, 1])
     
     with col2:
+        # Header with logo
         st.markdown("""
-        <div class="login-header">
-            <h1>🔐 AWS WAF Scanner</h1>
-            <p>Enterprise Edition - Sign In</p>
+        <div style="text-align: center; margin-bottom: 30px;">
+            <div style="font-size: 70px;">🏗️</div>
+            <h1 style="color: #FF9900; margin: 10px 0;">AWS WAF Scanner</h1>
+            <p style="color: #888; font-size: 16px;">Enterprise Edition</p>
         </div>
         """, unsafe_allow_html=True)
         
-        with st.form("login_form"):
-            email = st.text_input("📧 Email", placeholder="admin@company.com")
-            password = st.text_input("🔑 Password", type="password", placeholder="Enter your password")
+        # Login form container
+        st.markdown("""
+        <div style="background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); 
+                    padding: 30px; border-radius: 15px; border: 1px solid #FF9900;
+                    box-shadow: 0 10px 40px rgba(255, 153, 0, 0.2);">
+        """, unsafe_allow_html=True)
+        
+        st.markdown("### 🔐 Sign In to Continue")
+        st.markdown("---")
+        
+        with st.form("login_form", clear_on_submit=False):
+            email = st.text_input(
+                "📧 Email Address", 
+                placeholder="admin@wafscanner.local",
+                help="Enter your registered email address"
+            )
+            
+            password = st.text_input(
+                "🔑 Password", 
+                type="password", 
+                placeholder="Enter your password",
+                help="Enter your password"
+            )
             
             col_a, col_b = st.columns(2)
             with col_a:
-                remember = st.checkbox("Remember me")
+                remember = st.checkbox("Remember me", value=True)
             with col_b:
-                st.markdown("<div style='text-align: right; padding-top: 5px;'><a href='#' style='color: #FF9900; font-size: 12px;'>Forgot password?</a></div>", unsafe_allow_html=True)
+                st.markdown(
+                    "<div style='text-align: right; padding-top: 5px;'>"
+                    "<a href='#' style='color: #FF9900; font-size: 12px;'>Forgot password?</a>"
+                    "</div>", 
+                    unsafe_allow_html=True
+                )
             
-            submitted = st.form_submit_button("🚀 Sign In", use_container_width=True, type="primary")
+            st.markdown("")  # Spacing
+            
+            submitted = st.form_submit_button(
+                "🚀 Sign In", 
+                use_container_width=True, 
+                type="primary"
+            )
             
             if submitted:
                 if not email or not password:
-                    st.error("Please enter email and password")
+                    st.error("⚠️ Please enter both email and password")
                 else:
                     auth_mgr = get_auth_manager()
                     success, message, user = auth_mgr.authenticate(email, password)
                     
                     if success and user:
                         SessionManager.login(user)
-                        st.success(f"Welcome back, {user.display_name}!")
+                        st.success(f"✅ Welcome back, {user.display_name}!")
+                        st.balloons()
+                        import time
+                        time.sleep(1)
                         st.rerun()
                     else:
-                        st.error(message)
+                        st.error(f"❌ {message}")
         
-        st.markdown("---")
+        st.markdown("</div>", unsafe_allow_html=True)
         
-        # Demo login info
-        with st.expander("🎭 Demo Credentials"):
+        # Demo credentials section
+        st.markdown("")
+        st.markdown("")
+        
+        with st.expander("🎭 Demo Credentials (Click to expand)"):
             st.markdown("""
-            **Admin Account:**
-            - Email: `admin@wafscanner.local`
-            - Password: `Admin@123`
+            **Default Admin Account:**
             
-            *Demo mode uses local storage - no Firebase required*
+            | Field | Value |
+            |-------|-------|
+            | Email | `admin@wafscanner.local` |
+            | Password | `Admin@123` |
+            
+            *This demo account has full Super Admin access*
             """)
+            
+            if st.button("📋 Copy Demo Email", key="copy_email"):
+                st.code("admin@wafscanner.local")
+            
+            if st.button("📋 Copy Demo Password", key="copy_pass"):
+                st.code("Admin@123")
         
-        # SSO Options (placeholder)
-        st.markdown("#### Or sign in with:")
+        # SSO Options
+        st.markdown("---")
+        st.markdown("#### 🔗 Or sign in with:")
         
-        col_g, col_m = st.columns(2)
+        col_g, col_m, col_gh = st.columns(3)
         with col_g:
             if st.button("🔵 Google", use_container_width=True, disabled=True):
-                st.info("Google SSO requires Firebase configuration")
+                st.info("Requires Firebase")
         with col_m:
             if st.button("🟦 Microsoft", use_container_width=True, disabled=True):
-                st.info("Microsoft SSO requires Azure AD configuration")
+                st.info("Requires Azure AD")
+        with col_gh:
+            if st.button("⚫ GitHub", use_container_width=True, disabled=True):
+                st.info("Requires GitHub OAuth")
+        
+        st.caption("*SSO options require additional configuration*")
+        
+        # Features showcase
+        st.markdown("---")
+        st.markdown("#### ✨ Enterprise Features")
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            st.markdown("""
+            - 🔍 **WAF Scanning** - Multi-account
+            - 🤖 **AI Analysis** - Claude powered
+            - 📊 **Compliance** - CIS, PCI, HIPAA
+            """)
+        with col2:
+            st.markdown("""
+            - 🎨 **Architecture Designer**
+            - 💰 **Cost Optimization**
+            - 📄 **PDF Reports**
+            """)
+        
+        # Footer
+        st.markdown("---")
+        st.markdown(
+            "<div style='text-align: center; color: #666; font-size: 12px;'>"
+            "AWS WAF Scanner Enterprise v4.2 | © 2024"
+            "</div>",
+            unsafe_allow_html=True
+        )
 
 
 def render_user_menu():
