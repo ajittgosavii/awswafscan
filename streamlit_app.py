@@ -271,13 +271,14 @@ def render_header():
     # Render demo mode banner if in demo mode
     render_mode_banner()
     
-    # Professional header with Infosys text logo
+    
+    # Professional header with Infosys text wordmark
     st.markdown("""
         <div style="background: linear-gradient(135deg, #007CC3 0%, #232F3E 100%); 
                     padding: 1rem 1.5rem; border-radius: 8px; margin-bottom: 1.5rem; color: white;
                     display: flex; align-items: center; gap: 15px;">
-            <div style="background: white; padding: 6px 14px; border-radius: 4px;">
-                <span style="font-size: 18px; font-weight: 700; color: #007CC3; letter-spacing: 2px;">INFOSYS</span>
+            <div style="background: white; padding: 8px 16px; border-radius: 4px; display: flex; align-items: center;">
+                <span style="font-family: 'Segoe UI', Arial, sans-serif; font-size: 26px; font-weight: 500; color: #0066B3; letter-spacing: -0.5px;">Infosys</span><sup style="font-size: 10px; color: #0066B3; vertical-align: super; position: relative; top: -10px;">®</sup>
             </div>
             <div style="border-left: 2px solid rgba(255,255,255,0.3); padding-left: 15px;">
                 <h1 style="margin: 0; font-size: 1.5rem; font-weight: 600;">

@@ -298,11 +298,12 @@ class LocalUserStore:
     """Local user store - requires initial admin setup via secrets.toml"""
     
     def __init__(self):
+        self._ensure_session_state()
+    
+    def _ensure_session_state(self):
+        """Ensure all required session state variables exist"""
         if 'local_users' not in st.session_state:
-            # Initialize empty - admin must be configured in secrets.toml
             st.session_state.local_users = {}
-            
-            # Try to load initial admin from secrets
             self._load_admin_from_secrets()
         
         if 'local_organizations' not in st.session_state:
@@ -322,7 +323,7 @@ class LocalUserStore:
             st.session_state.audit_logs = []
         
         if 'initial_setup_done' not in st.session_state:
-            st.session_state.initial_setup_done = len(st.session_state.local_users) > 0
+            st.session_state.initial_setup_done = len(st.session_state.get('local_users', {})) > 0
     
     def _load_admin_from_secrets(self):
         """Load initial admin user from secrets.toml"""
@@ -350,12 +351,20 @@ class LocalUserStore:
         except Exception:
             pass
     
+    def _hash_password(self, password: str) -> str:
+        """Hash password with salt"""
+        salt = "waf-scanner-salt-2024"
+        return hashlib.sha256(f"{password}{salt}".encode()).hexdigest()
+    
     def has_users(self) -> bool:
         """Check if any users exist"""
-        return len(st.session_state.local_users) > 0
+        self._ensure_session_state()
+        return len(st.session_state.get('local_users', {})) > 0
     
     def create_initial_admin(self, email: str, password: str, name: str) -> Tuple[bool, str]:
         """Create the initial admin user (only if no users exist)"""
+        self._ensure_session_state()
+        
         if self.has_users():
             return False, "Admin user already exists"
         
@@ -379,14 +388,10 @@ class LocalUserStore:
         st.session_state.initial_setup_done = True
         return True, "Admin user created successfully"
     
-    def _hash_password(self, password: str) -> str:
-        """Hash password with salt"""
-        salt = "waf-scanner-salt-2024"
-        return hashlib.sha256(f"{password}{salt}".encode()).hexdigest()
-    
     def authenticate(self, email: str, password: str) -> Tuple[bool, str, Optional[User]]:
         """Authenticate user with email and password"""
-        users = st.session_state.local_users
+        self._ensure_session_state()
+        users = st.session_state.get('local_users', {})
         
         if email not in users:
             return False, "User not found", None
@@ -411,7 +416,8 @@ class LocalUserStore:
     def create_user(self, email: str, password: str, display_name: str, 
                    role: str, organization_id: str, created_by: str) -> Tuple[bool, str, Optional[User]]:
         """Create a new user"""
-        users = st.session_state.local_users
+        self._ensure_session_state()
+        users = st.session_state.get('local_users', {})
         
         if email in users:
             return False, "User already exists", None
@@ -442,7 +448,8 @@ class LocalUserStore:
     
     def update_user(self, uid: str, updates: Dict, updated_by: str) -> Tuple[bool, str]:
         """Update user data"""
-        users = st.session_state.local_users
+        self._ensure_session_state()
+        users = st.session_state.get('local_users', {})
         
         for email, user_data in users.items():
             if user_data['uid'] == uid:
@@ -459,7 +466,8 @@ class LocalUserStore:
     
     def delete_user(self, uid: str, deleted_by: str) -> Tuple[bool, str]:
         """Delete (deactivate) user"""
-        users = st.session_state.local_users
+        self._ensure_session_state()
+        users = st.session_state.get('local_users', {})
         
         for email, user_data in users.items():
             if user_data['uid'] == uid:
@@ -471,18 +479,21 @@ class LocalUserStore:
     
     def get_all_users(self) -> List[User]:
         """Get all users"""
-        return [User.from_dict(data) for data in st.session_state.local_users.values()]
+        self._ensure_session_state()
+        return [User.from_dict(data) for data in st.session_state.get('local_users', {}).values()]
     
     def get_user_by_uid(self, uid: str) -> Optional[User]:
         """Get user by UID"""
-        for data in st.session_state.local_users.values():
+        self._ensure_session_state()
+        for data in st.session_state.get('local_users', {}).values():
             if data['uid'] == uid:
                 return User.from_dict(data)
         return None
     
     def get_organization(self, org_id: str) -> Optional[Organization]:
         """Get organization by ID"""
-        orgs = st.session_state.local_organizations
+        self._ensure_session_state()
+        orgs = st.session_state.get('local_organizations', {})
         if org_id in orgs:
             data = orgs[org_id]
             return Organization(
@@ -499,6 +510,7 @@ class LocalUserStore:
     def _log_action(self, user_id: str, user_email: str, action: str, 
                    resource_type: str, resource_id: str, details: Dict):
         """Log an action"""
+        self._ensure_session_state()
         log = AuditLog(
             log_id=f"log-{uuid.uuid4().hex[:8]}",
             user_id=user_id,
@@ -508,11 +520,13 @@ class LocalUserStore:
             resource_id=resource_id,
             details=details,
         )
-        st.session_state.audit_logs.append(log.to_dict())
+        if 'audit_logs' in st.session_state:
+            st.session_state.audit_logs.append(log.to_dict())
     
     def get_audit_logs(self, limit: int = 100) -> List[Dict]:
         """Get recent audit logs"""
-        logs = st.session_state.audit_logs
+        self._ensure_session_state()
+        logs = st.session_state.get('audit_logs', [])
         return sorted(logs, key=lambda x: x['timestamp'], reverse=True)[:limit]
 
 
@@ -839,12 +853,10 @@ def render_initial_setup_page():
     col1, col2, col3 = st.columns([1, 2, 1])
     
     with col2:
-        # Header
+        # Infosys Wordmark Logo - Official text style
         st.markdown("""
         <div style="text-align: center; margin-bottom: 25px; margin-top: 30px;">
-            <div style="display: inline-block; padding: 8px 20px; background: linear-gradient(135deg, #007CC3 0%, #0066A1 100%); border-radius: 6px;">
-                <span style="font-size: 28px; font-weight: 700; color: white; letter-spacing: 3px;">INFOSYS</span>
-            </div>
+            <span style="font-family: 'Segoe UI', Arial, sans-serif; font-size: 48px; font-weight: 500; color: #0066B3; letter-spacing: -1px;">Infosys</span><sup style="font-size: 14px; color: #0066B3; vertical-align: super; position: relative; top: -18px;">®</sup>
         </div>
         <div style="text-align: center; margin-bottom: 30px;">
             <h1 style="color: #232F3E; margin: 0; font-size: 24px; font-weight: 600;">
@@ -908,20 +920,28 @@ def render_initial_setup_page():
                 elif admin_password != admin_password_confirm:
                     st.error("Passwords do not match")
                 else:
-                    # Create admin
-                    auth_mgr = get_auth_manager()
-                    success, message = auth_mgr.local_store.create_initial_admin(
-                        admin_email, admin_password, admin_name
-                    )
-                    
-                    if success:
-                        st.success("Administrator account created successfully!")
-                        st.info("Please sign in with your new credentials.")
-                        import time
-                        time.sleep(2)
-                        st.rerun()
-                    else:
-                        st.error(message)
+                    # Create admin - ensure auth manager is valid
+                    try:
+                        auth_mgr = get_auth_manager()
+                        if auth_mgr is None or not hasattr(auth_mgr, 'local_store'):
+                            st.error("System initialization error. Please refresh the page.")
+                        elif auth_mgr.local_store is None:
+                            st.error("User store not initialized. Please refresh the page.")
+                        else:
+                            success, message = auth_mgr.local_store.create_initial_admin(
+                                admin_email, admin_password, admin_name
+                            )
+                            
+                            if success:
+                                st.success("Administrator account created successfully!")
+                                st.info("Please sign in with your new credentials.")
+                                import time
+                                time.sleep(2)
+                                st.rerun()
+                            else:
+                                st.error(message)
+                    except Exception as e:
+                        st.error(f"Error creating admin: {str(e)}")
         
         # Alternative: Configure via secrets
         with st.expander("Alternative: Configure via secrets.toml"):
@@ -1062,12 +1082,10 @@ def render_login_page():
     col1, col2, col3 = st.columns([1, 2, 1])
     
     with col2:
-        # Infosys Text Logo - Professional and reliable
+        # Infosys Wordmark Logo - Official text style
         st.markdown("""
         <div style="text-align: center; margin-bottom: 25px; margin-top: 30px;">
-            <div style="display: inline-block; padding: 8px 20px; background: linear-gradient(135deg, #007CC3 0%, #0066A1 100%); border-radius: 6px;">
-                <span style="font-size: 28px; font-weight: 700; color: white; letter-spacing: 3px;">INFOSYS</span>
-            </div>
+            <span style="font-family: 'Segoe UI', Arial, sans-serif; font-size: 48px; font-weight: 500; color: #0066B3; letter-spacing: -1px;">Infosys</span><sup style="font-size: 14px; color: #0066B3; vertical-align: super; position: relative; top: -18px;">®</sup>
         </div>
         """, unsafe_allow_html=True)
         
