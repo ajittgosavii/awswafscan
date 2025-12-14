@@ -5,8 +5,36 @@ Wrapper module for integration with AWS WAF Scanner application
 This module wraps all EKS wizard functionality into a single render function
 that can be called from the main streamlit_app.py as a new tab.
 
+FEATURES (v2.3):
+- Dynamic AWS API Integration (NEW!)
+  - Real-time instance type fetching via EC2 DescribeInstanceTypes API
+  - Live pricing from AWS Pricing API
+  - Region-aware instance availability
+  - Session-state caching (1 hour TTL) for performance
+  - Graceful fallback to static catalog when API unavailable
+  - Refresh button for on-demand cache invalidation
+  - Pandas DataFrame display for instance specs
+- Architecture Upload & WAF Alignment Scoring
+  - Terraform file analysis
+  - CloudFormation template analysis
+  - Text/markdown description analysis
+  - Scoring against all 6 AWS Well-Architected Framework pillars
+  - Actionable recommendations with priority ranking
+  - Export reports (JSON, Markdown)
+- Safe Default Handling
+  - Automatic validation of multiselect defaults
+  - Fallback chain for invalid instance types
+  - Prevents Streamlit multiselect errors
+- Natural Language Requirements Parsing (AI-powered)
+- Form-based Configuration Input
+- Architecture Designer with topology selection
+- Security & Compliance Assessment
+- FinOps Cost Optimization
+- Infrastructure as Code Export (Terraform, CloudFormation)
+- Summary & Export
+
 Author: Infosys Cloud Architecture Team
-Version: 2.0.0
+Version: 2.3.0
 """
 
 import streamlit as st
@@ -15,7 +43,7 @@ import yaml
 import io
 import zipfile
 from datetime import datetime
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, Tuple
 
 # ============================================================================
 # MODULE IMPORTS WITH ERROR HANDLING
@@ -117,6 +145,677 @@ except ImportError as e:
 # ============================================================================
 
 INFOSYS_BLUE = "#007CC3"
+AWS_ORANGE = "#FF9900"
+
+# ============================================================================
+# AWS EC2 INSTANCE CATALOG & DYNAMIC PRICING
+# ============================================================================
+
+# Static fallback catalog (used when AWS APIs are unavailable)
+EC2_INSTANCE_CATALOG_FALLBACK = {
+    # General Purpose - M6i (Intel)
+    'm6i.large': {'vcpu': 2, 'memory': 8, 'price_per_hour': 0.096, 'family': 'General Purpose', 'processor': 'Intel'},
+    'm6i.xlarge': {'vcpu': 4, 'memory': 16, 'price_per_hour': 0.192, 'family': 'General Purpose', 'processor': 'Intel'},
+    'm6i.2xlarge': {'vcpu': 8, 'memory': 32, 'price_per_hour': 0.384, 'family': 'General Purpose', 'processor': 'Intel'},
+    'm6i.4xlarge': {'vcpu': 16, 'memory': 64, 'price_per_hour': 0.768, 'family': 'General Purpose', 'processor': 'Intel'},
+    # General Purpose - M7g (Graviton3)
+    'm7g.large': {'vcpu': 2, 'memory': 8, 'price_per_hour': 0.0816, 'family': 'General Purpose', 'processor': 'Graviton3'},
+    'm7g.xlarge': {'vcpu': 4, 'memory': 16, 'price_per_hour': 0.1632, 'family': 'General Purpose', 'processor': 'Graviton3'},
+    'm7g.2xlarge': {'vcpu': 8, 'memory': 32, 'price_per_hour': 0.3264, 'family': 'General Purpose', 'processor': 'Graviton3'},
+    # Compute Optimized
+    'c6i.large': {'vcpu': 2, 'memory': 4, 'price_per_hour': 0.085, 'family': 'Compute Optimized', 'processor': 'Intel'},
+    'c6i.xlarge': {'vcpu': 4, 'memory': 8, 'price_per_hour': 0.17, 'family': 'Compute Optimized', 'processor': 'Intel'},
+    'c6i.2xlarge': {'vcpu': 8, 'memory': 16, 'price_per_hour': 0.34, 'family': 'Compute Optimized', 'processor': 'Intel'},
+    'c7g.xlarge': {'vcpu': 4, 'memory': 8, 'price_per_hour': 0.1445, 'family': 'Compute Optimized', 'processor': 'Graviton3'},
+    # Memory Optimized
+    'r6i.large': {'vcpu': 2, 'memory': 16, 'price_per_hour': 0.126, 'family': 'Memory Optimized', 'processor': 'Intel'},
+    'r6i.xlarge': {'vcpu': 4, 'memory': 32, 'price_per_hour': 0.252, 'family': 'Memory Optimized', 'processor': 'Intel'},
+    'r6i.2xlarge': {'vcpu': 8, 'memory': 64, 'price_per_hour': 0.504, 'family': 'Memory Optimized', 'processor': 'Intel'},
+    # Burstable
+    't3.medium': {'vcpu': 2, 'memory': 4, 'price_per_hour': 0.0416, 'family': 'Burstable', 'processor': 'Intel'},
+    't3.large': {'vcpu': 2, 'memory': 8, 'price_per_hour': 0.0832, 'family': 'Burstable', 'processor': 'Intel'},
+    't3.xlarge': {'vcpu': 4, 'memory': 16, 'price_per_hour': 0.1664, 'family': 'Burstable', 'processor': 'Intel'},
+    # GPU
+    'g5.xlarge': {'vcpu': 4, 'memory': 16, 'price_per_hour': 1.006, 'family': 'GPU', 'processor': 'NVIDIA A10G', 'gpu': 1},
+    'g5.2xlarge': {'vcpu': 8, 'memory': 32, 'price_per_hour': 1.212, 'family': 'GPU', 'processor': 'NVIDIA A10G', 'gpu': 1},
+}
+
+# EKS-suitable instance family prefixes
+EKS_INSTANCE_FAMILIES = [
+    'm5', 'm5a', 'm5n', 'm6i', 'm6a', 'm6g', 'm7i', 'm7a', 'm7g',  # General Purpose
+    'c5', 'c5a', 'c5n', 'c6i', 'c6a', 'c6g', 'c7i', 'c7a', 'c7g',  # Compute Optimized
+    'r5', 'r5a', 'r5n', 'r6i', 'r6a', 'r6g', 'r7i', 'r7a', 'r7g',  # Memory Optimized
+    't3', 't3a',  # Burstable
+    'g4dn', 'g5', 'g5g', 'p4d', 'p5',  # GPU/ML
+    'i3', 'i3en', 'i4i',  # Storage Optimized
+    'inf1', 'inf2',  # Inference
+]
+
+# Default instance options (fallback)
+DEFAULT_EKS_INSTANCE_OPTIONS = [
+    'm6i.large', 'm6i.xlarge', 'm6i.2xlarge', 'm6i.4xlarge',
+    'm7g.large', 'm7g.xlarge', 'm7g.2xlarge',
+    'c6i.large', 'c6i.xlarge', 'c6i.2xlarge',
+    'c7g.large', 'c7g.xlarge',
+    'r6i.large', 'r6i.xlarge', 'r6i.2xlarge',
+    't3.medium', 't3.large', 't3.xlarge',
+    'g5.xlarge', 'g5.2xlarge',
+]
+
+
+class AWSEC2DynamicFetcher:
+    """
+    Dynamically fetch EC2 instance types and pricing from AWS APIs.
+    Uses session state caching to avoid repeated API calls.
+    """
+    
+    # Region to location name mapping for Pricing API
+    REGION_LOCATION_MAP = {
+        'us-east-1': 'US East (N. Virginia)',
+        'us-east-2': 'US East (Ohio)',
+        'us-west-1': 'US West (N. California)',
+        'us-west-2': 'US West (Oregon)',
+        'eu-west-1': 'EU (Ireland)',
+        'eu-west-2': 'EU (London)',
+        'eu-west-3': 'EU (Paris)',
+        'eu-central-1': 'EU (Frankfurt)',
+        'eu-north-1': 'EU (Stockholm)',
+        'ap-southeast-1': 'Asia Pacific (Singapore)',
+        'ap-southeast-2': 'Asia Pacific (Sydney)',
+        'ap-northeast-1': 'Asia Pacific (Tokyo)',
+        'ap-northeast-2': 'Asia Pacific (Seoul)',
+        'ap-northeast-3': 'Asia Pacific (Osaka)',
+        'ap-south-1': 'Asia Pacific (Mumbai)',
+        'sa-east-1': 'South America (Sao Paulo)',
+        'ca-central-1': 'Canada (Central)',
+        'me-south-1': 'Middle East (Bahrain)',
+        'af-south-1': 'Africa (Cape Town)',
+    }
+    
+    def __init__(self, region: str = 'us-east-1'):
+        self.region = region
+        self._ec2_client = None
+        self._pricing_client = None
+    
+    def _get_ec2_client(self):
+        """Get or create EC2 client"""
+        if self._ec2_client is None:
+            try:
+                import boto3
+                self._ec2_client = boto3.client('ec2', region_name=self.region)
+            except Exception:
+                return None
+        return self._ec2_client
+    
+    def _get_pricing_client(self):
+        """Get or create Pricing client (only works in us-east-1)"""
+        if self._pricing_client is None:
+            try:
+                import boto3
+                # Pricing API is only available in us-east-1 and ap-south-1
+                self._pricing_client = boto3.client('pricing', region_name='us-east-1')
+            except Exception:
+                return None
+        return self._pricing_client
+    
+    def fetch_instance_types(self, use_cache: bool = True) -> Dict[str, Dict]:
+        """
+        Fetch available EC2 instance types from AWS API.
+        
+        Returns:
+            Dict mapping instance type to specs (vcpu, memory, etc.)
+        """
+        # Check session state cache
+        cache_key = f'eks_instance_types_{self.region}'
+        if use_cache and cache_key in st.session_state:
+            cached = st.session_state[cache_key]
+            # Check if cache is still valid (1 hour)
+            if cached.get('timestamp') and (datetime.now() - cached['timestamp']).seconds < 3600:
+                return cached.get('data', {})
+        
+        ec2_client = self._get_ec2_client()
+        if not ec2_client:
+            return {}
+        
+        try:
+            instances = {}
+            paginator = ec2_client.get_paginator('describe_instance_types')
+            
+            # Filter for current generation, EKS-suitable instances
+            for page in paginator.paginate(
+                Filters=[
+                    {'Name': 'current-generation', 'Values': ['true']},
+                    {'Name': 'supported-usage-class', 'Values': ['on-demand', 'spot']},
+                    {'Name': 'supported-virtualization-type', 'Values': ['hvm']},
+                ]
+            ):
+                for instance in page.get('InstanceTypes', []):
+                    instance_type = instance.get('InstanceType', '')
+                    
+                    # Filter for EKS-suitable instance families
+                    family_prefix = instance_type.split('.')[0] if '.' in instance_type else ''
+                    if not any(instance_type.startswith(f) for f in EKS_INSTANCE_FAMILIES):
+                        continue
+                    
+                    # Extract specs
+                    vcpu = instance.get('VCpuInfo', {}).get('DefaultVCpus', 0)
+                    memory_mib = instance.get('MemoryInfo', {}).get('SizeInMiB', 0)
+                    memory_gb = round(memory_mib / 1024, 1)
+                    
+                    # Processor info
+                    proc_info = instance.get('ProcessorInfo', {})
+                    architectures = proc_info.get('SupportedArchitectures', ['x86_64'])
+                    processor = 'Graviton' if 'arm64' in architectures else 'Intel/AMD'
+                    
+                    # GPU info
+                    gpu_info = instance.get('GpuInfo', {})
+                    gpus = gpu_info.get('Gpus', [])
+                    gpu_count = sum(g.get('Count', 0) for g in gpus)
+                    gpu_name = gpus[0].get('Name', '') if gpus else ''
+                    
+                    # Determine family category
+                    if family_prefix.startswith(('g', 'p', 'inf')):
+                        family = 'GPU/ML'
+                    elif family_prefix.startswith('c'):
+                        family = 'Compute Optimized'
+                    elif family_prefix.startswith('r'):
+                        family = 'Memory Optimized'
+                    elif family_prefix.startswith('i'):
+                        family = 'Storage Optimized'
+                    elif family_prefix.startswith('t'):
+                        family = 'Burstable'
+                    else:
+                        family = 'General Purpose'
+                    
+                    instances[instance_type] = {
+                        'vcpu': vcpu,
+                        'memory': memory_gb,
+                        'family': family,
+                        'processor': gpu_name if gpu_name else processor,
+                        'gpu': gpu_count,
+                        'architecture': architectures[0] if architectures else 'x86_64',
+                        'source': 'AWS API'
+                    }
+            
+            # Cache the results
+            st.session_state[cache_key] = {
+                'timestamp': datetime.now(),
+                'data': instances
+            }
+            
+            return instances
+            
+        except Exception as e:
+            st.session_state[f'{cache_key}_error'] = str(e)
+            return {}
+    
+    def fetch_pricing(self, instance_types: List[str] = None, use_cache: bool = True) -> Dict[str, float]:
+        """
+        Fetch On-Demand pricing from AWS Pricing API.
+        
+        Returns:
+            Dict mapping instance type to hourly price
+        """
+        # Check session state cache
+        cache_key = f'eks_pricing_{self.region}'
+        if use_cache and cache_key in st.session_state:
+            cached = st.session_state[cache_key]
+            if cached.get('timestamp') and (datetime.now() - cached['timestamp']).seconds < 3600:
+                return cached.get('data', {})
+        
+        pricing_client = self._get_pricing_client()
+        if not pricing_client:
+            return {}
+        
+        location = self.REGION_LOCATION_MAP.get(self.region, 'US East (N. Virginia)')
+        pricing = {}
+        
+        # Limit to specific instance types or fetch common ones
+        types_to_fetch = instance_types or list(EC2_INSTANCE_CATALOG_FALLBACK.keys())
+        
+        try:
+            for instance_type in types_to_fetch[:30]:  # Limit API calls
+                try:
+                    response = pricing_client.get_products(
+                        ServiceCode='AmazonEC2',
+                        Filters=[
+                            {'Type': 'TERM_MATCH', 'Field': 'instanceType', 'Value': instance_type},
+                            {'Type': 'TERM_MATCH', 'Field': 'location', 'Value': location},
+                            {'Type': 'TERM_MATCH', 'Field': 'operatingSystem', 'Value': 'Linux'},
+                            {'Type': 'TERM_MATCH', 'Field': 'tenancy', 'Value': 'Shared'},
+                            {'Type': 'TERM_MATCH', 'Field': 'preInstalledSw', 'Value': 'NA'},
+                            {'Type': 'TERM_MATCH', 'Field': 'capacitystatus', 'Value': 'Used'},
+                        ],
+                        MaxResults=1
+                    )
+                    
+                    if response.get('PriceList'):
+                        price_item = json.loads(response['PriceList'][0])
+                        on_demand = price_item.get('terms', {}).get('OnDemand', {})
+                        
+                        for term_value in on_demand.values():
+                            for dim_value in term_value.get('priceDimensions', {}).values():
+                                price_str = dim_value.get('pricePerUnit', {}).get('USD', '0')
+                                pricing[instance_type] = float(price_str)
+                                break
+                            break
+                            
+                except Exception:
+                    continue  # Skip this instance type
+            
+            # Cache the results
+            st.session_state[cache_key] = {
+                'timestamp': datetime.now(),
+                'data': pricing
+            }
+            
+            return pricing
+            
+        except Exception as e:
+            st.session_state[f'{cache_key}_error'] = str(e)
+            return {}
+    
+    def get_eks_instance_options(self, use_cache: bool = True) -> List[str]:
+        """
+        Get sorted list of instance types suitable for EKS.
+        Tries AWS API first, falls back to static list.
+        """
+        # Try to fetch from AWS API
+        instances = self.fetch_instance_types(use_cache=use_cache)
+        
+        if instances:
+            # Sort by family, then by size
+            def sort_key(inst_type):
+                family = instances.get(inst_type, {}).get('family', 'Z')
+                vcpu = instances.get(inst_type, {}).get('vcpu', 0)
+                return (family, vcpu)
+            
+            return sorted(instances.keys(), key=sort_key)
+        
+        # Fallback to static list
+        return DEFAULT_EKS_INSTANCE_OPTIONS
+    
+    def get_instance_info(self, instance_type: str) -> Dict:
+        """
+        Get complete info for a specific instance type.
+        Combines specs and pricing.
+        """
+        # Try dynamic fetch first
+        instances = self.fetch_instance_types()
+        pricing = self.fetch_pricing([instance_type])
+        
+        if instance_type in instances:
+            info = instances[instance_type].copy()
+            info['price_per_hour'] = pricing.get(instance_type, 0)
+            info['monthly_cost'] = info['price_per_hour'] * 730
+            return info
+        
+        # Fallback to static catalog
+        if instance_type in EC2_INSTANCE_CATALOG_FALLBACK:
+            info = EC2_INSTANCE_CATALOG_FALLBACK[instance_type].copy()
+            info['monthly_cost'] = info.get('price_per_hour', 0) * 730
+            info['source'] = 'Static Catalog'
+            return info
+        
+        return {
+            'vcpu': 'Unknown',
+            'memory': 'Unknown',
+            'price_per_hour': 0,
+            'monthly_cost': 0,
+            'family': 'Unknown',
+            'processor': 'Unknown',
+            'source': 'Not found'
+        }
+
+
+def get_dynamic_instance_options(region: str = 'us-east-1') -> Tuple[List[str], str]:
+    """
+    Get instance options dynamically from AWS API.
+    Returns (list of instance types, source description)
+    """
+    fetcher = AWSEC2DynamicFetcher(region=region)
+    
+    # Try to fetch from AWS
+    instances = fetcher.fetch_instance_types()
+    
+    if instances:
+        # Filter and sort for EKS-suitable instances
+        eks_instances = []
+        for inst_type, specs in instances.items():
+            # Filter out very large instances (cost control)
+            if specs.get('vcpu', 0) <= 96 and specs.get('memory', 0) <= 768:
+                eks_instances.append(inst_type)
+        
+        # Sort by family then size
+        def sort_key(inst_type):
+            specs = instances.get(inst_type, {})
+            family_order = {
+                'General Purpose': 1, 'Compute Optimized': 2, 
+                'Memory Optimized': 3, 'Burstable': 4,
+                'Storage Optimized': 5, 'GPU/ML': 6
+            }
+            return (
+                family_order.get(specs.get('family', 'Z'), 99),
+                specs.get('vcpu', 0),
+                specs.get('memory', 0)
+            )
+        
+        sorted_instances = sorted(eks_instances, key=sort_key)
+        return sorted_instances[:50], f"AWS API ({len(sorted_instances)} types from {region})"
+    
+    # Fallback
+    return DEFAULT_EKS_INSTANCE_OPTIONS, "Static Catalog (AWS API unavailable)"
+
+
+def get_safe_instance_defaults(current_defaults: List[str], available_options: List[str]) -> List[str]:
+    """
+    Ensure default instance types are always a subset of available options.
+    This prevents the Streamlit multiselect error.
+    """
+    if not current_defaults:
+        return ['m6i.xlarge'] if 'm6i.xlarge' in available_options else [available_options[0]] if available_options else []
+    
+    # Filter defaults to only include options that exist
+    safe_defaults = [d for d in current_defaults if d in available_options]
+    
+    # If no valid defaults remain, use a safe fallback
+    if not safe_defaults:
+        fallbacks = ['m6i.xlarge', 'm6i.large', 'm6a.xlarge', 'm7g.xlarge', 't3.xlarge', 't3.large']
+        for fallback in fallbacks:
+            if fallback in available_options:
+                return [fallback]
+        return [available_options[0]] if available_options else []
+    
+    return safe_defaults
+
+
+# Legacy compatibility alias
+AWSEC2PricingFetcher = AWSEC2DynamicFetcher
+EC2_INSTANCE_CATALOG = EC2_INSTANCE_CATALOG_FALLBACK
+
+
+# ============================================================================
+# WAF PILLARS FOR ALIGNMENT SCORING
+# ============================================================================
+
+WAF_PILLARS = {
+    'operational_excellence': {
+        'name': 'Operational Excellence',
+        'icon': '⚙️',
+        'color': '#3F8624',
+        'checks': ['logging', 'monitoring', 'runbooks', 'automation', 'gitops']
+    },
+    'security': {
+        'name': 'Security',
+        'icon': '🔒',
+        'color': '#D32F2F',
+        'checks': ['encryption', 'irsa', 'network_policies', 'secrets_management', 'pod_security']
+    },
+    'reliability': {
+        'name': 'Reliability',
+        'icon': '🛡️',
+        'color': '#1976D2',
+        'checks': ['multi_az', 'auto_scaling', 'health_checks', 'dr_strategy', 'backup']
+    },
+    'performance_efficiency': {
+        'name': 'Performance Efficiency',
+        'icon': '⚡',
+        'color': '#FF9800',
+        'checks': ['right_sizing', 'metrics_server', 'hpa', 'caching', 'cdn']
+    },
+    'cost_optimization': {
+        'name': 'Cost Optimization',
+        'icon': '💰',
+        'color': '#4CAF50',
+        'checks': ['spot_instances', 'karpenter', 'savings_plans', 'rightsizing', 'cleanup']
+    },
+    'sustainability': {
+        'name': 'Sustainability',
+        'icon': '🌱',
+        'color': '#00796B',
+        'checks': ['graviton', 'efficient_instances', 'resource_optimization', 'serverless']
+    }
+}
+
+# ============================================================================
+# ARCHITECTURE UPLOAD ANALYZER
+# ============================================================================
+
+class ArchitectureUploadAnalyzer:
+    """Analyze uploaded architecture documents and score against WAF pillars"""
+    
+    @staticmethod
+    def analyze_terraform(content: str) -> Dict:
+        """Analyze Terraform file and extract architecture components"""
+        components = {
+            'eks_cluster': 'aws_eks_cluster' in content or 'module "eks"' in content,
+            'vpc': 'aws_vpc' in content or 'module "vpc"' in content,
+            'node_groups': 'eks_managed_node_groups' in content or 'aws_eks_node_group' in content,
+            'karpenter': 'karpenter' in content.lower(),
+            'alb': 'aws_lb' in content or 'load_balancer' in content.lower(),
+            'rds': 'aws_db_instance' in content or 'aws_rds_cluster' in content,
+            's3': 'aws_s3_bucket' in content,
+            'secrets_manager': 'aws_secretsmanager' in content,
+            'kms': 'aws_kms_key' in content,
+            'cloudwatch': 'aws_cloudwatch' in content,
+            'iam_roles': 'aws_iam_role' in content,
+            'security_groups': 'aws_security_group' in content,
+            'multi_az': 'availability_zones' in content or 'azs' in content,
+            'encryption': 'encrypted = true' in content.lower() or 'kms_key' in content,
+            'autoscaling': 'autoscaling' in content.lower() or 'scaling_config' in content,
+            'prometheus': 'prometheus' in content.lower(),
+            'grafana': 'grafana' in content.lower(),
+            'argocd': 'argocd' in content.lower(),
+            'spot_instances': 'SPOT' in content or 'spot' in content.lower(),
+            'graviton': 'graviton' in content.lower() or any(g in content for g in ['m6g', 'c6g', 'r6g', 'm7g', 'c7g']),
+        }
+        return components
+    
+    @staticmethod
+    def analyze_cloudformation(content: str) -> Dict:
+        """Analyze CloudFormation template and extract components"""
+        components = {
+            'eks_cluster': 'AWS::EKS::Cluster' in content,
+            'vpc': 'AWS::EC2::VPC' in content,
+            'node_groups': 'AWS::EKS::Nodegroup' in content,
+            'alb': 'AWS::ElasticLoadBalancingV2' in content,
+            'rds': 'AWS::RDS::DBInstance' in content or 'AWS::RDS::DBCluster' in content,
+            's3': 'AWS::S3::Bucket' in content,
+            'secrets_manager': 'AWS::SecretsManager' in content,
+            'kms': 'AWS::KMS::Key' in content,
+            'cloudwatch': 'AWS::CloudWatch' in content or 'AWS::Logs' in content,
+            'iam_roles': 'AWS::IAM::Role' in content,
+            'security_groups': 'AWS::EC2::SecurityGroup' in content,
+            'multi_az': 'AvailabilityZone' in content,
+            'encryption': 'StorageEncrypted' in content or 'KmsKeyId' in content,
+            'autoscaling': 'AWS::AutoScaling' in content or 'ScalingConfig' in content,
+            'karpenter': 'karpenter' in content.lower(),
+            'prometheus': 'prometheus' in content.lower(),
+            'grafana': 'grafana' in content.lower(),
+            'argocd': 'argocd' in content.lower(),
+            'spot_instances': 'SPOT' in content,
+            'graviton': any(g in content for g in ['m6g', 'c6g', 'r6g', 'm7g', 'c7g']),
+        }
+        return components
+    
+    @staticmethod
+    def analyze_text_description(content: str) -> Dict:
+        """Analyze text/markdown description for architecture components"""
+        content_lower = content.lower()
+        components = {
+            'eks_cluster': any(k in content_lower for k in ['eks', 'kubernetes', 'k8s']),
+            'vpc': 'vpc' in content_lower,
+            'node_groups': any(k in content_lower for k in ['node group', 'nodegroup', 'worker node']),
+            'karpenter': 'karpenter' in content_lower,
+            'alb': any(k in content_lower for k in ['alb', 'load balancer', 'nlb', 'elb']),
+            'rds': any(k in content_lower for k in ['rds', 'aurora', 'database', 'mysql', 'postgres']),
+            's3': 's3' in content_lower or 'object storage' in content_lower,
+            'secrets_manager': any(k in content_lower for k in ['secrets manager', 'vault', 'secrets']),
+            'kms': 'kms' in content_lower or 'encryption key' in content_lower,
+            'cloudwatch': any(k in content_lower for k in ['cloudwatch', 'monitoring', 'logging', 'observability']),
+            'iam_roles': any(k in content_lower for k in ['iam', 'irsa', 'service account', 'role']),
+            'multi_az': any(k in content_lower for k in ['multi-az', 'availability zone', 'ha', 'high availability', 'multiple az']),
+            'encryption': any(k in content_lower for k in ['encrypt', 'tls', 'ssl', 'kms']),
+            'autoscaling': any(k in content_lower for k in ['autoscal', 'hpa', 'vpa', 'scale', 'keda']),
+            'prometheus': 'prometheus' in content_lower,
+            'grafana': 'grafana' in content_lower,
+            'argocd': 'argocd' in content_lower or 'argo cd' in content_lower or 'gitops' in content_lower,
+            'security_groups': any(k in content_lower for k in ['security group', 'firewall', 'network policy']),
+            'spot_instances': any(k in content_lower for k in ['spot', 'spot instance']),
+            'graviton': 'graviton' in content_lower or 'arm64' in content_lower,
+        }
+        return components
+    
+    @staticmethod
+    def calculate_waf_alignment(components: Dict) -> Dict:
+        """Calculate WAF alignment scores based on detected components"""
+        scores = {}
+        
+        # Operational Excellence
+        ops_checks = {
+            'logging': components.get('cloudwatch', False),
+            'monitoring': components.get('prometheus', False) or components.get('cloudwatch', False) or components.get('grafana', False),
+            'automation': components.get('autoscaling', False),
+            'gitops': components.get('argocd', False),
+            'iac': True  # Assumed if analyzing IaC
+        }
+        ops_score = sum(ops_checks.values()) / len(ops_checks) * 100
+        ops_recommendations = []
+        if not ops_checks['logging']:
+            ops_recommendations.append('Enable CloudWatch logging for comprehensive audit trails')
+        if not ops_checks['monitoring']:
+            ops_recommendations.append('Add Prometheus/Grafana for detailed cluster monitoring')
+        if not ops_checks['gitops']:
+            ops_recommendations.append('Implement GitOps with ArgoCD or Flux for declarative deployments')
+        if not ops_checks['automation']:
+            ops_recommendations.append('Enable auto-scaling for operational efficiency')
+        
+        scores['operational_excellence'] = {
+            'score': ops_score,
+            'checks': ops_checks,
+            'recommendations': ops_recommendations
+        }
+        
+        # Security
+        sec_checks = {
+            'encryption': components.get('encryption', False) or components.get('kms', False),
+            'secrets_management': components.get('secrets_manager', False),
+            'iam_roles': components.get('iam_roles', False),
+            'network_security': components.get('security_groups', False),
+            'private_networking': components.get('vpc', False)
+        }
+        sec_score = sum(sec_checks.values()) / len(sec_checks) * 100
+        sec_recommendations = []
+        if not sec_checks['encryption']:
+            sec_recommendations.append('Enable encryption at rest with KMS for EBS, EFS, and secrets')
+        if not sec_checks['secrets_management']:
+            sec_recommendations.append('Use AWS Secrets Manager or External Secrets for sensitive data')
+        if not sec_checks['iam_roles']:
+            sec_recommendations.append('Implement IRSA (IAM Roles for Service Accounts) for least privilege')
+        if not sec_checks['network_security']:
+            sec_recommendations.append('Configure security groups and network policies for pod isolation')
+        
+        scores['security'] = {
+            'score': sec_score,
+            'checks': sec_checks,
+            'recommendations': sec_recommendations
+        }
+        
+        # Reliability
+        rel_checks = {
+            'multi_az': components.get('multi_az', False),
+            'auto_scaling': components.get('autoscaling', False),
+            'managed_services': components.get('rds', False) or components.get('eks_cluster', False),
+            'load_balancing': components.get('alb', False),
+            'backup_capable': components.get('s3', False) or components.get('rds', False)
+        }
+        rel_score = sum(rel_checks.values()) / len(rel_checks) * 100
+        rel_recommendations = []
+        if not rel_checks['multi_az']:
+            rel_recommendations.append('Deploy across multiple Availability Zones (minimum 2, recommended 3)')
+        if not rel_checks['auto_scaling']:
+            rel_recommendations.append('Implement auto-scaling for workload resilience')
+        if not rel_checks['load_balancing']:
+            rel_recommendations.append('Use Application Load Balancer for traffic distribution')
+        
+        scores['reliability'] = {
+            'score': rel_score,
+            'checks': rel_checks,
+            'recommendations': rel_recommendations
+        }
+        
+        # Performance Efficiency
+        perf_checks = {
+            'container_orchestration': components.get('eks_cluster', False),
+            'load_balancing': components.get('alb', False),
+            'auto_scaling': components.get('autoscaling', False),
+            'right_sizing': components.get('karpenter', False) or components.get('node_groups', False),
+            'monitoring': components.get('prometheus', False) or components.get('cloudwatch', False)
+        }
+        perf_score = sum(perf_checks.values()) / len(perf_checks) * 100
+        perf_recommendations = []
+        if not perf_checks['right_sizing']:
+            perf_recommendations.append('Use Karpenter for intelligent node provisioning and right-sizing')
+        if not perf_checks['monitoring']:
+            perf_recommendations.append('Enable metrics collection for performance optimization decisions')
+        
+        scores['performance_efficiency'] = {
+            'score': perf_score,
+            'checks': perf_checks,
+            'recommendations': perf_recommendations
+        }
+        
+        # Cost Optimization
+        cost_checks = {
+            'karpenter': components.get('karpenter', False),
+            'spot_instances': components.get('spot_instances', False),
+            'auto_scaling': components.get('autoscaling', False),
+            'managed_services': components.get('eks_cluster', False),
+            'monitoring': components.get('cloudwatch', False)
+        }
+        cost_score = sum(cost_checks.values()) / len(cost_checks) * 100
+        cost_recommendations = []
+        if not cost_checks['karpenter']:
+            cost_recommendations.append('Implement Karpenter for 30-50% cost savings through consolidation')
+        if not cost_checks['spot_instances']:
+            cost_recommendations.append('Use Spot instances for fault-tolerant workloads (60-90% savings)')
+        if not cost_checks['auto_scaling']:
+            cost_recommendations.append('Enable auto-scaling to avoid over-provisioning')
+        
+        scores['cost_optimization'] = {
+            'score': cost_score,
+            'checks': cost_checks,
+            'recommendations': cost_recommendations
+        }
+        
+        # Sustainability
+        sus_checks = {
+            'graviton': components.get('graviton', False),
+            'managed_services': components.get('eks_cluster', False),
+            'auto_scaling': components.get('autoscaling', False),
+            'efficient_storage': components.get('s3', False)
+        }
+        sus_score = sum(sus_checks.values()) / len(sus_checks) * 100
+        sus_recommendations = []
+        if not sus_checks['graviton']:
+            sus_recommendations.append('Use Graviton instances for 20-40% better price-performance and lower carbon footprint')
+        if not sus_checks['auto_scaling']:
+            sus_recommendations.append('Use auto-scaling to reduce idle resources and energy consumption')
+        
+        scores['sustainability'] = {
+            'score': sus_score,
+            'checks': sus_checks,
+            'recommendations': sus_recommendations
+        }
+        
+        # Overall score
+        total_score = sum(p['score'] for p in scores.values()) / len(scores)
+        
+        return {
+            'overall_score': total_score,
+            'pillars': scores,
+            'components_detected': components
+        }
 
 # ============================================================================
 # SESSION STATE INITIALIZATION
@@ -134,6 +833,11 @@ def init_eks_wizard_state():
         st.session_state.eks_cost_estimate = None
     if 'eks_generated_configs' not in st.session_state:
         st.session_state.eks_generated_configs = {}
+    # New: Architecture Upload & WAF Alignment
+    if 'eks_uploaded_architecture' not in st.session_state:
+        st.session_state.eks_uploaded_architecture = None
+    if 'eks_waf_alignment' not in st.session_state:
+        st.session_state.eks_waf_alignment = None
 
 # ============================================================================
 # MAIN RENDER FUNCTION
@@ -155,10 +859,10 @@ class EKSArchitectureWizardModule:
             <div style="display: flex; justify-content: space-between; align-items: center;">
                 <div>
                     <h2 style="margin: 0; color: white;">🚀 EKS AI Architecture Design Wizard</h2>
-                    <p style="margin: 5px 0 0 0; opacity: 0.9;">Enterprise Kubernetes architecture with AI-powered recommendations</p>
+                    <p style="margin: 5px 0 0 0; opacity: 0.9;">Enterprise Kubernetes architecture with AI-powered recommendations & WAF alignment</p>
                 </div>
                 <div style="text-align: right;">
-                    <span style="font-size: 1.2rem; font-weight: bold;">v2.0</span>
+                    <span style="font-size: 1.2rem; font-weight: bold;">v2.3</span>
                 </div>
             </div>
         </div>
@@ -176,8 +880,9 @@ class EKSArchitectureWizardModule:
                     else:
                         st.error(f"❌ {module.title()}")
         
-        # Main tabs
-        tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+        # Main tabs - Now includes Architecture Upload & WAF Analysis
+        tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+            "📤 Upload & Analyze",
             "🎯 Requirements",
             "🏗️ Architecture",
             "🔒 Security",
@@ -187,22 +892,321 @@ class EKSArchitectureWizardModule:
         ])
         
         with tab1:
-            EKSArchitectureWizardModule._render_requirements_tab()
+            EKSArchitectureWizardModule._render_upload_tab()
         
         with tab2:
-            EKSArchitectureWizardModule._render_architecture_tab()
+            EKSArchitectureWizardModule._render_requirements_tab()
         
         with tab3:
-            EKSArchitectureWizardModule._render_security_tab()
+            EKSArchitectureWizardModule._render_architecture_tab()
         
         with tab4:
-            EKSArchitectureWizardModule._render_finops_tab()
+            EKSArchitectureWizardModule._render_security_tab()
         
         with tab5:
-            EKSArchitectureWizardModule._render_iac_tab()
+            EKSArchitectureWizardModule._render_finops_tab()
         
         with tab6:
+            EKSArchitectureWizardModule._render_iac_tab()
+        
+        with tab7:
             EKSArchitectureWizardModule._render_summary_tab()
+    
+    @staticmethod
+    def _render_upload_tab():
+        """Render Architecture Upload & WAF Analysis tab"""
+        
+        st.markdown("### 📤 Upload Existing Architecture for WAF Analysis")
+        st.markdown("""
+        Upload your existing EKS architecture documents (Terraform, CloudFormation, or text descriptions) 
+        to analyze alignment with **AWS Well-Architected Framework** pillars and get actionable recommendations.
+        """)
+        
+        # Upload type selection
+        upload_type = st.radio(
+            "Select Upload Type",
+            ["📄 Terraform (.tf)", "📄 CloudFormation (.yaml/.json)", "📝 Text/Markdown Description", "📋 Architecture Document (.docx)"],
+            horizontal=True
+        )
+        
+        # File uploader
+        file_types = ['tf'] if 'Terraform' in upload_type else ['yaml', 'yml', 'json'] if 'CloudFormation' in upload_type else ['md', 'txt'] if 'Text' in upload_type else ['docx', 'doc', 'pdf']
+        
+        uploaded_file = st.file_uploader(
+            "Upload your architecture file",
+            type=file_types + ['tf', 'yaml', 'yml', 'json', 'md', 'txt'],  # Accept all common types
+            help="Upload Terraform, CloudFormation, text description, or architecture document"
+        )
+        
+        # Or paste content directly
+        st.markdown("**— OR paste content directly —**")
+        pasted_content = st.text_area(
+            "Paste architecture content",
+            height=200,
+            placeholder="Paste your Terraform code, CloudFormation YAML, or architecture description here...",
+            help="You can paste Terraform HCL, CloudFormation YAML/JSON, or plain text description"
+        )
+        
+        # Example templates
+        with st.expander("💡 Example: What to upload?"):
+            st.markdown("""
+            **Terraform Example:**
+            ```hcl
+            module "eks" {
+              source  = "terraform-aws-modules/eks/aws"
+              cluster_name    = "production-eks"
+              cluster_version = "1.29"
+              vpc_id          = module.vpc.vpc_id
+              subnet_ids      = module.vpc.private_subnets
+              
+              eks_managed_node_groups = {
+                application = {
+                  instance_types = ["m6i.xlarge"]
+                  capacity_type  = "SPOT"
+                  min_size       = 2
+                  max_size       = 10
+                }
+              }
+            }
+            ```
+            
+            **Text Description Example:**
+            > "Our EKS cluster runs in us-east-1 across 3 AZs with Karpenter for auto-scaling. 
+            > We use ALB for ingress, Prometheus/Grafana for monitoring, and ArgoCD for GitOps deployments.
+            > All data is encrypted with KMS, and we use IRSA for pod-level IAM permissions."
+            """)
+        
+        # Analyze button
+        if st.button("🔍 Analyze Architecture & Score WAF Alignment", type="primary", use_container_width=True):
+            content = ""
+            
+            if uploaded_file:
+                try:
+                    content = uploaded_file.read().decode('utf-8')
+                    st.session_state.eks_uploaded_architecture = content
+                except Exception as e:
+                    st.error(f"Error reading file: {str(e)}")
+                    return
+            elif pasted_content:
+                content = pasted_content
+                st.session_state.eks_uploaded_architecture = content
+            
+            if content:
+                with st.spinner("🔄 Analyzing architecture against WAF pillars..."):
+                    # Determine file type and analyze
+                    if "Terraform" in upload_type or content.strip().startswith('terraform') or 'resource "aws' in content or 'module "' in content:
+                        components = ArchitectureUploadAnalyzer.analyze_terraform(content)
+                        analysis_type = "Terraform"
+                    elif "CloudFormation" in upload_type or 'AWSTemplateFormatVersion' in content or 'Resources:' in content:
+                        components = ArchitectureUploadAnalyzer.analyze_cloudformation(content)
+                        analysis_type = "CloudFormation"
+                    else:
+                        components = ArchitectureUploadAnalyzer.analyze_text_description(content)
+                        analysis_type = "Text Description"
+                    
+                    # Calculate WAF alignment
+                    waf_alignment = ArchitectureUploadAnalyzer.calculate_waf_alignment(components)
+                    st.session_state.eks_waf_alignment = waf_alignment
+                    
+                    st.success(f"✅ Architecture analysis complete! (Analyzed as: {analysis_type})")
+            else:
+                st.warning("⚠️ Please upload a file or paste content to analyze.")
+        
+        # Display WAF alignment results
+        if st.session_state.eks_waf_alignment:
+            st.markdown("---")
+            st.markdown("## 📊 WAF Alignment Results")
+            
+            alignment = st.session_state.eks_waf_alignment
+            overall_score = alignment.get('overall_score', 0)
+            
+            # Overall score gauge with color coding
+            if overall_score >= 80:
+                score_color = "#4CAF50"  # Green
+                score_level = "Excellent"
+                score_emoji = "🏆"
+            elif overall_score >= 60:
+                score_color = "#FF9800"  # Orange
+                score_level = "Good"
+                score_emoji = "✅"
+            elif overall_score >= 40:
+                score_color = "#FF5722"  # Deep Orange
+                score_level = "Needs Improvement"
+                score_emoji = "⚠️"
+            else:
+                score_color = "#F44336"  # Red
+                score_level = "Critical Gaps"
+                score_emoji = "🚨"
+            
+            st.markdown(f"""
+            <div style="text-align: center; padding: 25px; background: linear-gradient(135deg, {score_color} 0%, {score_color}dd 100%); 
+                        border-radius: 15px; color: white; margin-bottom: 25px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+                <div style="font-size: 4rem; font-weight: bold; text-shadow: 2px 2px 4px rgba(0,0,0,0.2);">{overall_score:.0f}%</div>
+                <div style="font-size: 1.5rem; margin-top: 5px;">{score_emoji} {score_level}</div>
+                <div style="font-size: 1rem; opacity: 0.9; margin-top: 10px;">Overall WAF Alignment Score</div>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            # Pillar-by-Pillar Analysis
+            st.markdown("### 📈 Pillar-by-Pillar Analysis")
+            
+            # Create 3 columns for 6 pillars (2 rows)
+            pillars_list = list(alignment.get('pillars', {}).items())
+            
+            for row in range(2):
+                cols = st.columns(3)
+                for col_idx in range(3):
+                    pillar_idx = row * 3 + col_idx
+                    if pillar_idx < len(pillars_list):
+                        pillar_key, pillar_data = pillars_list[pillar_idx]
+                        pillar_info = WAF_PILLARS.get(pillar_key, {})
+                        pillar_name = pillar_info.get('name', pillar_key.replace('_', ' ').title())
+                        pillar_icon = pillar_info.get('icon', '📋')
+                        pillar_color = pillar_info.get('color', '#666')
+                        score = pillar_data.get('score', 0)
+                        
+                        # Determine score color
+                        if score >= 80:
+                            border_color = "#4CAF50"
+                        elif score >= 60:
+                            border_color = "#FF9800"
+                        else:
+                            border_color = "#F44336"
+                        
+                        with cols[col_idx]:
+                            st.markdown(f"""
+                            <div style="padding: 15px; background: #f8f9fa; border-radius: 10px; 
+                                        border-left: 5px solid {border_color}; margin-bottom: 15px;
+                                        box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
+                                <div style="font-size: 1.1rem; font-weight: bold; color: #333;">
+                                    {pillar_icon} {pillar_name}
+                                </div>
+                                <div style="font-size: 2rem; font-weight: bold; color: {border_color}; margin: 10px 0;">
+                                    {score:.0f}%
+                                </div>
+                                <div style="font-size: 0.8rem; color: #666;">
+                                    {sum(pillar_data.get('checks', {}).values())}/{len(pillar_data.get('checks', {}))} checks passed
+                                </div>
+                            </div>
+                            """, unsafe_allow_html=True)
+            
+            # Detailed Recommendations
+            st.markdown("### 💡 Recommendations for Improvement")
+            
+            all_recommendations = []
+            for pillar_key, pillar_data in alignment.get('pillars', {}).items():
+                pillar_info = WAF_PILLARS.get(pillar_key, {})
+                pillar_name = pillar_info.get('name', pillar_key.replace('_', ' ').title())
+                pillar_icon = pillar_info.get('icon', '📋')
+                for rec in pillar_data.get('recommendations', []):
+                    all_recommendations.append({
+                        'pillar': pillar_name,
+                        'icon': pillar_icon,
+                        'recommendation': rec,
+                        'score': pillar_data.get('score', 0)
+                    })
+            
+            # Sort by pillar score (lowest first - most critical)
+            all_recommendations.sort(key=lambda x: x['score'])
+            
+            if all_recommendations:
+                for i, rec in enumerate(all_recommendations):
+                    priority = "🔴 High" if rec['score'] < 40 else "🟡 Medium" if rec['score'] < 70 else "🟢 Low"
+                    with st.expander(f"{priority} | {rec['icon']} {rec['pillar']}: {rec['recommendation'][:60]}..."):
+                        st.markdown(f"**Pillar:** {rec['icon']} {rec['pillar']}")
+                        st.markdown(f"**Current Score:** {rec['score']:.0f}%")
+                        st.markdown(f"**Recommendation:** {rec['recommendation']}")
+                        st.markdown("---")
+                        st.markdown("**Why this matters:**")
+                        if 'security' in rec['pillar'].lower():
+                            st.info("🔒 Security gaps can lead to data breaches, compliance failures, and reputational damage.")
+                        elif 'cost' in rec['pillar'].lower():
+                            st.info("💰 Cost optimization can reduce your AWS bill by 30-50% without impacting performance.")
+                        elif 'reliability' in rec['pillar'].lower():
+                            st.info("🛡️ Reliability improvements increase uptime and reduce incident response time.")
+                        elif 'performance' in rec['pillar'].lower():
+                            st.info("⚡ Performance optimizations improve user experience and reduce latency.")
+                        elif 'operational' in rec['pillar'].lower():
+                            st.info("⚙️ Operational excellence reduces toil and improves deployment velocity.")
+                        elif 'sustainability' in rec['pillar'].lower():
+                            st.info("🌱 Sustainability improvements reduce carbon footprint and can lower costs.")
+            else:
+                st.success("🎉 Excellent! No critical recommendations - your architecture is well-aligned with WAF best practices!")
+            
+            # Detected Components Summary
+            with st.expander("🔍 Detected Architecture Components"):
+                components = alignment.get('components_detected', {})
+                detected = [k for k, v in components.items() if v]
+                not_detected = [k for k, v in components.items() if not v]
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.markdown("**✅ Detected Components:**")
+                    if detected:
+                        for comp in sorted(detected):
+                            st.markdown(f"- {comp.replace('_', ' ').title()}")
+                    else:
+                        st.markdown("*No components detected*")
+                with col2:
+                    st.markdown("**❌ Not Detected (Consider Adding):**")
+                    if not_detected:
+                        for comp in sorted(not_detected)[:10]:
+                            st.markdown(f"- {comp.replace('_', ' ').title()}")
+                    else:
+                        st.markdown("*All key components detected!*")
+            
+            # Export Report
+            st.markdown("---")
+            st.markdown("### 📥 Export WAF Analysis Report")
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                report_json = json.dumps({
+                    'analysis_date': datetime.now().isoformat(),
+                    'overall_score': overall_score,
+                    'score_level': score_level,
+                    'pillars': {k: {'score': v['score'], 'recommendations': v['recommendations']} 
+                               for k, v in alignment.get('pillars', {}).items()},
+                    'components_detected': alignment.get('components_detected', {})
+                }, indent=2)
+                st.download_button(
+                    "📄 Download Report (JSON)",
+                    report_json,
+                    "waf-alignment-report.json",
+                    "application/json",
+                    use_container_width=True
+                )
+            with col2:
+                # Create markdown report
+                report_md = f"""# WAF Alignment Report
+                
+**Analysis Date:** {datetime.now().strftime('%Y-%m-%d %H:%M')}
+
+## Overall Score: {overall_score:.0f}% ({score_level})
+
+## Pillar Scores
+
+| Pillar | Score | Status |
+|--------|-------|--------|
+"""
+                for pillar_key, pillar_data in alignment.get('pillars', {}).items():
+                    pillar_info = WAF_PILLARS.get(pillar_key, {})
+                    pillar_name = pillar_info.get('name', pillar_key)
+                    score = pillar_data.get('score', 0)
+                    status = "✅ Good" if score >= 80 else "⚠️ Needs Work" if score >= 60 else "❌ Critical"
+                    report_md += f"| {pillar_name} | {score:.0f}% | {status} |\n"
+                
+                report_md += "\n## Recommendations\n\n"
+                for rec in all_recommendations:
+                    report_md += f"- **{rec['pillar']}**: {rec['recommendation']}\n"
+                
+                st.download_button(
+                    "📄 Download Report (Markdown)",
+                    report_md,
+                    "waf-alignment-report.md",
+                    "text/markdown",
+                    use_container_width=True
+                )
     
     @staticmethod
     def _render_requirements_tab():
@@ -365,6 +1369,7 @@ class EKSArchitectureWizardModule:
             return
         
         config = st.session_state.eks_cluster_config
+        region = config.get('region', 'us-east-1')
         
         # Cluster topology
         st.markdown("#### Cluster Topology")
@@ -381,6 +1386,88 @@ class EKSArchitectureWizardModule:
         }
         st.info(topology_info.get(topology, ""))
         
+        # Dynamic Instance Type Fetching
+        st.markdown("#### Instance Types")
+        
+        # Fetch button and status
+        col_fetch1, col_fetch2 = st.columns([3, 1])
+        with col_fetch1:
+            fetch_from_aws = st.checkbox(
+                "🔄 Fetch instance types from AWS API", 
+                value=True,
+                help="Dynamically fetch available instance types from your AWS account"
+            )
+        with col_fetch2:
+            if st.button("🔄 Refresh", help="Force refresh from AWS API"):
+                # Clear cache to force refresh
+                for key in list(st.session_state.keys()):
+                    if key.startswith('eks_instance_types_') or key.startswith('eks_pricing_'):
+                        del st.session_state[key]
+                st.rerun()
+        
+        # Get instance options (dynamic or static)
+        if fetch_from_aws:
+            with st.spinner("Fetching instance types from AWS..."):
+                instance_options, source = get_dynamic_instance_options(region)
+        else:
+            instance_options = DEFAULT_EKS_INSTANCE_OPTIONS
+            source = "Static Catalog (manual selection)"
+        
+        # Show source info
+        if 'AWS API' in source:
+            st.success(f"✅ {source}")
+        else:
+            st.warning(f"⚠️ {source}")
+        
+        # Show pricing info toggle
+        show_pricing = st.checkbox("💰 Show instance pricing & specs", value=False)
+        
+        if show_pricing:
+            st.markdown("##### Instance Reference (On-Demand pricing)")
+            
+            fetcher = AWSEC2DynamicFetcher(region=region)
+            
+            # Try to get pricing
+            pricing_data = fetcher.fetch_pricing(instance_options[:20])
+            instances_data = fetcher.fetch_instance_types()
+            
+            # Build display data
+            display_data = []
+            for inst_type in instance_options[:20]:
+                if inst_type in instances_data:
+                    specs = instances_data[inst_type]
+                    price = pricing_data.get(inst_type, 0)
+                    if price == 0 and inst_type in EC2_INSTANCE_CATALOG_FALLBACK:
+                        price = EC2_INSTANCE_CATALOG_FALLBACK[inst_type].get('price_per_hour', 0)
+                    
+                    display_data.append({
+                        'Instance': inst_type,
+                        'vCPU': specs.get('vcpu', 'N/A'),
+                        'Memory (GB)': specs.get('memory', 'N/A'),
+                        'Family': specs.get('family', 'N/A'),
+                        'Processor': specs.get('processor', 'N/A'),
+                        '$/Hour': f"${price:.4f}" if price else 'N/A',
+                        '$/Month': f"${price * 730:.0f}" if price else 'N/A',
+                    })
+                elif inst_type in EC2_INSTANCE_CATALOG_FALLBACK:
+                    specs = EC2_INSTANCE_CATALOG_FALLBACK[inst_type]
+                    display_data.append({
+                        'Instance': inst_type,
+                        'vCPU': specs.get('vcpu', 'N/A'),
+                        'Memory (GB)': specs.get('memory', 'N/A'),
+                        'Family': specs.get('family', 'N/A'),
+                        'Processor': specs.get('processor', 'N/A'),
+                        '$/Hour': f"${specs.get('price_per_hour', 0):.4f}",
+                        '$/Month': f"${specs.get('price_per_hour', 0) * 730:.0f}",
+                    })
+            
+            if display_data:
+                import pandas as pd
+                df = pd.DataFrame(display_data)
+                st.dataframe(df, use_container_width=True, hide_index=True)
+            else:
+                st.info("No pricing data available. Connect to AWS for live pricing.")
+        
         # Node Groups
         st.markdown("#### Node Groups")
         node_groups = config.get("node_groups", [])
@@ -389,19 +1476,58 @@ class EKSArchitectureWizardModule:
             with st.expander(f"🖥️ {ng.get('name', f'group-{i}')}", expanded=i==0):
                 col1, col2, col3 = st.columns(3)
                 with col1:
+                    # Get safe defaults that exist in options
+                    current_instance_types = ng.get('instance_types', ['m6i.xlarge'])
+                    safe_defaults = get_safe_instance_defaults(current_instance_types, instance_options)
+                    
                     ng['instance_types'] = st.multiselect(
                         f"Instance Types##{i}",
-                        options=["m6i.large", "m6i.xlarge", "m6i.2xlarge", "c6i.xlarge", "r6i.xlarge", "g5.xlarge"],
-                        default=ng.get('instance_types', ['m6i.xlarge'])
+                        options=instance_options,
+                        default=safe_defaults,
+                        help="Select one or more instance types for this node group"
                     )
                 with col2:
+                    capacity_options = ["ON_DEMAND", "SPOT"]
+                    current_capacity = ng.get('capacity_type', 'ON_DEMAND')
+                    capacity_index = capacity_options.index(current_capacity) if current_capacity in capacity_options else 0
+                    
                     ng['capacity_type'] = st.selectbox(
                         f"Capacity##{i}",
-                        ["ON_DEMAND", "SPOT"],
-                        index=0 if ng.get('capacity_type') == 'ON_DEMAND' else 1
+                        capacity_options,
+                        index=capacity_index,
+                        help="ON_DEMAND for stable workloads, SPOT for cost savings (60-90% cheaper)"
                     )
                 with col3:
-                    ng['desired_size'] = st.number_input(f"Nodes##{i}", value=ng.get('desired_size', 2), min_value=1)
+                    ng['desired_size'] = st.number_input(
+                        f"Nodes##{i}", 
+                        value=ng.get('desired_size', 2), 
+                        min_value=1,
+                        max_value=100,
+                        help="Number of nodes in this group"
+                    )
+                
+                # Show estimated cost for this node group
+                if ng.get('instance_types'):
+                    primary_instance = ng['instance_types'][0]
+                    fetcher = AWSEC2DynamicFetcher(region=region)
+                    pricing_info = fetcher.get_instance_info(primary_instance)
+                    hourly_rate = pricing_info.get('price_per_hour', 0)
+                    
+                    # Apply spot discount if applicable
+                    if ng.get('capacity_type') == 'SPOT':
+                        hourly_rate *= 0.35  # ~65% discount for Spot
+                    
+                    node_count = ng.get('desired_size', 2)
+                    monthly_cost = hourly_rate * 730 * node_count
+                    
+                    spot_badge = "🏷️ Spot (~65% savings)" if ng.get('capacity_type') == 'SPOT' else "📦 On-Demand"
+                    vcpu = pricing_info.get('vcpu', 'N/A')
+                    memory = pricing_info.get('memory', 'N/A')
+                    
+                    st.caption(
+                        f"💰 Estimated: **${monthly_cost:,.0f}/month** ({spot_badge}) | "
+                        f"{node_count} × {primary_instance} ({vcpu} vCPU, {memory} GB RAM)"
+                    )
         
         # Add-ons
         st.markdown("#### EKS Add-ons")
