@@ -112,12 +112,14 @@ except Exception as e:
         MODULE_ERRORS['Architecture Designer'] = f"AI: {str(e)}, Legacy: {str(e2)}"
         ARCHITECTURE_DESIGNER_AI = False
 
+# EKS Modernization Module - Now replaced by AI-Enhanced EKS Architecture Wizard
+# Legacy module kept for backward compatibility but not used in tabs
 try:
     from eks_modernization_module import EKSModernizationModule
-    MODULE_STATUS['EKS Modernization'] = True
+    MODULE_STATUS['EKS Modernization Legacy'] = True
 except Exception as e:
-    MODULE_STATUS['EKS Modernization'] = False
-    MODULE_ERRORS['EKS Modernization'] = str(e)
+    MODULE_STATUS['EKS Modernization Legacy'] = False
+    MODULE_ERRORS['EKS Modernization Legacy'] = str(e)
 
 try:
     from compliance_module import ComplianceModule
@@ -141,6 +143,14 @@ try:
 except Exception as e:
     MODULE_STATUS['AI Assistant'] = False
     MODULE_ERRORS['AI Assistant'] = str(e)
+
+# EKS Architecture Wizard Module (AI-Enhanced v2.0) - Replaces EKS Modernization
+try:
+    from eks_architecture_wizard_module import EKSArchitectureWizardModule, render_eks_architecture_wizard
+    MODULE_STATUS['EKS Modernization'] = True  # Use same key for compatibility
+except Exception as e:
+    MODULE_STATUS['EKS Modernization'] = False
+    MODULE_ERRORS['EKS Modernization'] = str(e)
 
 # ============================================================================
 # HEADER
@@ -2963,15 +2973,19 @@ def render_main_content():
             st.warning("FinOps module not available")
             st.info("Cost optimization features require the FinOps module.")
     
-    # Tab 6: EKS Modernization
+    # Tab 6: EKS Modernization (AI-Enhanced v2.0 - Powered by EKS Architecture Wizard)
     with tabs[5]:
         if MODULE_STATUS.get('EKS Modernization'):
             try:
-                EKSModernizationModule.render()
+                EKSArchitectureWizardModule.render()
             except Exception as e:
                 st.error(f"Error loading EKS Modernization: {str(e)}")
+                import traceback
+                with st.expander("Error Details"):
+                    st.code(traceback.format_exc())
         else:
             st.warning("EKS Modernization module not available")
+            st.info("The EKS Modernization module provides AI-powered Kubernetes architecture design with Terraform/CloudFormation generation.")
     
     # Tab 7: Compliance
     with tabs[6]:
