@@ -5,15 +5,21 @@ Wrapper module for integration with AWS WAF Scanner application
 This module wraps all EKS wizard functionality into a single render function
 that can be called from the main streamlit_app.py as a new tab.
 
-FEATURES (v2.3):
-- Dynamic AWS API Integration (NEW!)
+FEATURES (v2.4):
+- AI-Powered NLP Architecture Design (NEW!)
+  - Natural language requirements input
+  - Automatic workload type detection (web, data, ML, HA, cost-optimized)
+  - Compliance requirement extraction (PCI-DSS, HIPAA, SOC2, ISO27001, GDPR)
+  - Performance and budget analysis
+  - AI-generated architecture with node groups, security, observability
+  - Optional Claude API integration for enhanced analysis
+  - WAF alignment scoring for AI-generated architectures
+- Dynamic AWS API Integration
   - Real-time instance type fetching via EC2 DescribeInstanceTypes API
   - Live pricing from AWS Pricing API
   - Region-aware instance availability
   - Session-state caching (1 hour TTL) for performance
   - Graceful fallback to static catalog when API unavailable
-  - Refresh button for on-demand cache invalidation
-  - Pandas DataFrame display for instance specs
 - Architecture Upload & WAF Alignment Scoring
   - Terraform file analysis
   - CloudFormation template analysis
@@ -34,7 +40,7 @@ FEATURES (v2.3):
 - Summary & Export
 
 Author: Infosys Cloud Architecture Team
-Version: 2.3.0
+Version: 2.4.0
 """
 
 import streamlit as st
@@ -535,6 +541,421 @@ EC2_INSTANCE_CATALOG = EC2_INSTANCE_CATALOG_FALLBACK
 
 
 # ============================================================================
+# AI-POWERED NLP ARCHITECTURE DESIGNER
+# ============================================================================
+
+class AIArchitectureDesigner:
+    """
+    AI-powered Natural Language Processing for EKS architecture design.
+    Uses Claude API to parse requirements and generate WAF-aligned architectures.
+    """
+    
+    # Architecture patterns for different workload types
+    WORKLOAD_PATTERNS = {
+        'web_application': {
+            'description': 'Web applications, APIs, microservices',
+            'keywords': ['web', 'api', 'microservice', 'rest', 'graphql', 'frontend', 'backend', 'website'],
+            'recommended': {
+                'instance_types': ['m6i.xlarge', 'm6i.2xlarge'],
+                'min_nodes': 3,
+                'autoscaling': True,
+                'spot_percentage': 50,
+                'addons': ['alb-controller', 'external-dns', 'cert-manager'],
+            }
+        },
+        'data_processing': {
+            'description': 'Data pipelines, ETL, batch processing',
+            'keywords': ['data', 'etl', 'batch', 'spark', 'pipeline', 'processing', 'analytics'],
+            'recommended': {
+                'instance_types': ['r6i.xlarge', 'r6i.2xlarge'],
+                'min_nodes': 2,
+                'autoscaling': True,
+                'spot_percentage': 70,
+                'addons': ['cluster-autoscaler', 'karpenter'],
+            }
+        },
+        'machine_learning': {
+            'description': 'ML training, inference, AI workloads',
+            'keywords': ['ml', 'machine learning', 'ai', 'training', 'inference', 'model', 'gpu', 'tensorflow', 'pytorch'],
+            'recommended': {
+                'instance_types': ['g5.xlarge', 'g5.2xlarge', 'p4d.24xlarge'],
+                'min_nodes': 1,
+                'autoscaling': True,
+                'spot_percentage': 30,
+                'addons': ['nvidia-device-plugin', 'karpenter'],
+            }
+        },
+        'high_availability': {
+            'description': 'Mission-critical, high availability workloads',
+            'keywords': ['critical', 'production', 'high availability', 'ha', '99.99', '99.9', 'mission critical', 'enterprise'],
+            'recommended': {
+                'instance_types': ['m6i.xlarge', 'm6i.2xlarge'],
+                'min_nodes': 6,
+                'autoscaling': True,
+                'spot_percentage': 0,
+                'multi_az': True,
+                'addons': ['alb-controller', 'external-dns', 'velero'],
+            }
+        },
+        'cost_optimized': {
+            'description': 'Development, testing, cost-sensitive workloads',
+            'keywords': ['dev', 'development', 'test', 'staging', 'cost', 'budget', 'cheap', 'economical'],
+            'recommended': {
+                'instance_types': ['t3.large', 't3.xlarge', 'm6a.large'],
+                'min_nodes': 2,
+                'autoscaling': True,
+                'spot_percentage': 80,
+                'addons': ['karpenter'],
+            }
+        },
+    }
+    
+    # Compliance requirement mappings
+    COMPLIANCE_KEYWORDS = {
+        'pci_dss': ['pci', 'pci-dss', 'payment', 'credit card', 'cardholder'],
+        'hipaa': ['hipaa', 'health', 'phi', 'medical', 'healthcare', 'patient'],
+        'soc2': ['soc2', 'soc 2', 'audit', 'trust'],
+        'iso_27001': ['iso', 'iso27001', 'iso 27001', 'information security'],
+        'gdpr': ['gdpr', 'european', 'eu data', 'privacy'],
+        'fedramp': ['fedramp', 'federal', 'government', 'gov'],
+    }
+    
+    @staticmethod
+    def parse_requirements_locally(requirements_text: str) -> Dict:
+        """
+        Parse natural language requirements without external AI API.
+        Uses keyword matching and pattern recognition.
+        """
+        text_lower = requirements_text.lower()
+        
+        # Detect workload type
+        detected_workload = 'web_application'  # Default
+        max_matches = 0
+        for workload_type, config in AIArchitectureDesigner.WORKLOAD_PATTERNS.items():
+            matches = sum(1 for kw in config['keywords'] if kw in text_lower)
+            if matches > max_matches:
+                max_matches = matches
+                detected_workload = workload_type
+        
+        # Detect compliance requirements
+        detected_compliance = []
+        for compliance, keywords in AIArchitectureDesigner.COMPLIANCE_KEYWORDS.items():
+            if any(kw in text_lower for kw in keywords):
+                detected_compliance.append(compliance)
+        
+        # Extract numeric values
+        import re
+        
+        # Pod/service count
+        pod_match = re.search(r'(\d+)\s*(pod|service|microservice|application|container)', text_lower)
+        estimated_pods = int(pod_match.group(1)) if pod_match else 20
+        
+        # Request rate
+        rps_match = re.search(r'(\d+[,\d]*)\s*(request|rps|req/s|qps)', text_lower)
+        requests_per_second = int(rps_match.group(1).replace(',', '')) if rps_match else 1000
+        
+        # Availability target
+        availability_match = re.search(r'(99\.?\d*)\s*%?\s*(uptime|availability|sla)', text_lower)
+        availability_target = availability_match.group(1) if availability_match else '99.9'
+        
+        # Budget
+        budget_match = re.search(r'\$?\s*(\d+[,\d]*)\s*(k|thousand|/month|monthly|budget)', text_lower)
+        monthly_budget = int(budget_match.group(1).replace(',', '')) * (1000 if 'k' in (budget_match.group(2) or '') else 1) if budget_match else 10000
+        
+        # Region
+        region = 'us-east-1'
+        region_patterns = {
+            'us-east-1': ['virginia', 'us-east-1', 'n. virginia'],
+            'us-east-2': ['ohio', 'us-east-2'],
+            'us-west-2': ['oregon', 'us-west-2'],
+            'eu-west-1': ['ireland', 'eu-west-1', 'europe'],
+            'ap-southeast-1': ['singapore', 'ap-southeast-1', 'asia'],
+        }
+        for reg, patterns in region_patterns.items():
+            if any(p in text_lower for p in patterns):
+                region = reg
+                break
+        
+        # Environment
+        environment = 'production'
+        if any(e in text_lower for e in ['dev', 'development', 'sandbox']):
+            environment = 'development'
+        elif any(e in text_lower for e in ['staging', 'stage', 'uat', 'test']):
+            environment = 'staging'
+        
+        # Get workload pattern recommendations
+        pattern = AIArchitectureDesigner.WORKLOAD_PATTERNS[detected_workload]
+        
+        return {
+            'workload_type': detected_workload,
+            'workload_description': pattern['description'],
+            'environment': environment,
+            'region': region,
+            'estimated_pods': estimated_pods,
+            'requests_per_second': requests_per_second,
+            'availability_target': availability_target,
+            'monthly_budget': monthly_budget,
+            'compliance': detected_compliance,
+            'recommended_instances': pattern['recommended']['instance_types'],
+            'min_nodes': pattern['recommended']['min_nodes'],
+            'spot_percentage': pattern['recommended']['spot_percentage'],
+            'addons': pattern['recommended'].get('addons', []),
+            'original_text': requirements_text,
+        }
+    
+    @staticmethod
+    def generate_architecture_from_requirements(parsed_requirements: Dict) -> Dict:
+        """Generate a complete EKS architecture configuration from parsed requirements."""
+        
+        workload_type = parsed_requirements.get('workload_type', 'web_application')
+        environment = parsed_requirements.get('environment', 'production')
+        region = parsed_requirements.get('region', 'us-east-1')
+        compliance = parsed_requirements.get('compliance', [])
+        estimated_pods = parsed_requirements.get('estimated_pods', 20)
+        min_nodes = parsed_requirements.get('min_nodes', 3)
+        spot_percentage = parsed_requirements.get('spot_percentage', 50)
+        
+        # Calculate node requirements
+        pods_per_node = 30  # Conservative estimate
+        required_nodes = max(min_nodes, (estimated_pods // pods_per_node) + 1)
+        
+        # Adjust for HA if production
+        if environment == 'production':
+            required_nodes = max(required_nodes, 3)
+        
+        # Calculate spot vs on-demand split
+        spot_nodes = int(required_nodes * (spot_percentage / 100))
+        on_demand_nodes = required_nodes - spot_nodes
+        
+        # Build node groups
+        node_groups = []
+        
+        # System node group (always on-demand)
+        node_groups.append({
+            'name': 'system',
+            'instance_types': ['m6i.large'],
+            'capacity_type': 'ON_DEMAND',
+            'min_size': 2,
+            'max_size': 4,
+            'desired_size': 2,
+            'labels': {'workload-type': 'system'},
+            'taints': []
+        })
+        
+        # Application node group
+        recommended_instances = parsed_requirements.get('recommended_instances', ['m6i.xlarge'])
+        
+        if on_demand_nodes > 0:
+            node_groups.append({
+                'name': 'application-ondemand',
+                'instance_types': recommended_instances[:2],
+                'capacity_type': 'ON_DEMAND',
+                'min_size': max(1, on_demand_nodes - 1),
+                'max_size': on_demand_nodes * 3,
+                'desired_size': on_demand_nodes,
+                'labels': {'workload-type': 'application', 'capacity': 'on-demand'},
+                'taints': []
+            })
+        
+        if spot_nodes > 0:
+            node_groups.append({
+                'name': 'application-spot',
+                'instance_types': recommended_instances + ['m6a.xlarge', 'm5.xlarge'],  # Diversify for spot
+                'capacity_type': 'SPOT',
+                'min_size': 0,
+                'max_size': spot_nodes * 4,
+                'desired_size': spot_nodes,
+                'labels': {'workload-type': 'application', 'capacity': 'spot'},
+                'taints': []
+            })
+        
+        # GPU node group if ML workload
+        if workload_type == 'machine_learning':
+            node_groups.append({
+                'name': 'gpu-ml',
+                'instance_types': ['g5.xlarge', 'g5.2xlarge'],
+                'capacity_type': 'ON_DEMAND',
+                'min_size': 0,
+                'max_size': 4,
+                'desired_size': 1,
+                'labels': {'workload-type': 'ml', 'gpu': 'true'},
+                'taints': [{'key': 'nvidia.com/gpu', 'value': 'true', 'effect': 'NoSchedule'}]
+            })
+        
+        # Security configuration based on compliance
+        security_config = {
+            'private_endpoint': environment == 'production',
+            'public_endpoint': environment != 'production',
+            'enable_secrets_encryption': True,
+            'enable_network_policies': len(compliance) > 0 or environment == 'production',
+            'enable_audit_logging': True,
+            'enable_irsa': True,
+            'pod_security_standards': 'restricted' if compliance else 'baseline',
+            'enable_guardduty': any(c in compliance for c in ['pci_dss', 'hipaa']),
+        }
+        
+        # Observability configuration
+        observability_config = {
+            'enable_container_insights': True,
+            'enable_prometheus': environment == 'production',
+            'enable_grafana': environment == 'production',
+            'log_retention_days': 90 if compliance else 30,
+            'enable_distributed_tracing': environment == 'production',
+        }
+        
+        # Add-ons
+        addons = ['vpc-cni', 'coredns', 'kube-proxy', 'ebs-csi-driver']
+        if environment == 'production':
+            addons.extend(['aws-load-balancer-controller', 'external-dns', 'cert-manager'])
+        if spot_percentage > 0:
+            addons.append('karpenter')
+        addons.extend(parsed_requirements.get('addons', []))
+        addons = list(set(addons))  # Remove duplicates
+        
+        return {
+            'cluster_name': f"eks-{environment}-{workload_type.replace('_', '-')}",
+            'kubernetes_version': '1.29',
+            'region': region,
+            'environment': environment,
+            'workload_type': workload_type,
+            'node_groups': node_groups,
+            'security': security_config,
+            'observability': observability_config,
+            'addons': addons,
+            'compliance': compliance,
+            'estimated_monthly_cost': AIArchitectureDesigner._estimate_cost(node_groups, region),
+            'parsed_requirements': parsed_requirements,
+        }
+    
+    @staticmethod
+    def _estimate_cost(node_groups: List[Dict], region: str) -> float:
+        """Estimate monthly cost for the architecture."""
+        total_cost = 0
+        
+        # EKS control plane cost
+        total_cost += 73  # $0.10/hour * 730 hours
+        
+        # Node costs
+        for ng in node_groups:
+            instance_type = ng['instance_types'][0] if ng['instance_types'] else 'm6i.xlarge'
+            node_count = ng.get('desired_size', 2)
+            
+            # Get hourly rate from catalog
+            hourly_rate = EC2_INSTANCE_CATALOG_FALLBACK.get(instance_type, {}).get('price_per_hour', 0.192)
+            
+            # Apply spot discount if applicable
+            if ng.get('capacity_type') == 'SPOT':
+                hourly_rate *= 0.35
+            
+            total_cost += hourly_rate * 730 * node_count
+        
+        return round(total_cost, 2)
+    
+    @staticmethod
+    def analyze_with_claude_api(requirements_text: str, api_key: str = None) -> Dict:
+        """
+        Use Claude API to analyze requirements and generate architecture.
+        Falls back to local parsing if API unavailable.
+        """
+        if not api_key:
+            # Try to get from environment or Streamlit secrets
+            import os
+            api_key = os.environ.get('ANTHROPIC_API_KEY')
+            if not api_key:
+                try:
+                    api_key = st.secrets.get('ANTHROPIC_API_KEY')
+                except:
+                    pass
+        
+        if not api_key:
+            # Fall back to local parsing
+            return AIArchitectureDesigner.parse_requirements_locally(requirements_text)
+        
+        try:
+            import anthropic
+            
+            client = anthropic.Anthropic(api_key=api_key)
+            
+            prompt = f"""Analyze the following EKS architecture requirements and extract structured information.
+
+Requirements:
+{requirements_text}
+
+Please extract and return a JSON object with the following fields:
+- workload_type: one of [web_application, data_processing, machine_learning, high_availability, cost_optimized]
+- environment: one of [production, staging, development]
+- region: AWS region code (e.g., us-east-1)
+- estimated_pods: estimated number of pods/containers
+- requests_per_second: estimated requests per second
+- availability_target: target availability percentage (e.g., "99.9")
+- monthly_budget: estimated monthly budget in USD
+- compliance: list of compliance requirements from [pci_dss, hipaa, soc2, iso_27001, gdpr, fedramp]
+- recommended_instances: list of recommended EC2 instance types
+- min_nodes: minimum number of nodes recommended
+- spot_percentage: percentage of nodes that can use spot instances (0-100)
+- key_requirements: list of key requirements extracted from the text
+- risks_identified: list of potential risks or concerns
+
+Return ONLY valid JSON, no other text."""
+
+            response = client.messages.create(
+                model="claude-sonnet-4-20250514",
+                max_tokens=1024,
+                messages=[{"role": "user", "content": prompt}]
+            )
+            
+            # Parse the response
+            response_text = response.content[0].text
+            
+            # Extract JSON from response
+            import re
+            json_match = re.search(r'\{[\s\S]*\}', response_text)
+            if json_match:
+                parsed = json.loads(json_match.group())
+                parsed['original_text'] = requirements_text
+                parsed['analysis_source'] = 'Claude AI'
+                return parsed
+            
+        except Exception as e:
+            st.warning(f"AI analysis unavailable: {str(e)}. Using local parsing.")
+        
+        # Fall back to local parsing
+        result = AIArchitectureDesigner.parse_requirements_locally(requirements_text)
+        result['analysis_source'] = 'Local Parser'
+        return result
+    
+    @staticmethod
+    def generate_waf_alignment_from_architecture(architecture: Dict) -> Dict:
+        """
+        Generate WAF alignment scores from a generated architecture configuration.
+        """
+        # Build components dict from architecture
+        components = {
+            'eks_cluster': True,
+            'vpc': True,
+            'node_groups': len(architecture.get('node_groups', [])) > 0,
+            'karpenter': 'karpenter' in architecture.get('addons', []),
+            'alb': 'aws-load-balancer-controller' in architecture.get('addons', []),
+            'cloudwatch': architecture.get('observability', {}).get('enable_container_insights', False),
+            'prometheus': architecture.get('observability', {}).get('enable_prometheus', False),
+            'grafana': architecture.get('observability', {}).get('enable_grafana', False),
+            'secrets_manager': architecture.get('security', {}).get('enable_secrets_encryption', False),
+            'kms': architecture.get('security', {}).get('enable_secrets_encryption', False),
+            'iam_roles': architecture.get('security', {}).get('enable_irsa', False),
+            'security_groups': True,
+            'multi_az': architecture.get('environment') == 'production',
+            'encryption': architecture.get('security', {}).get('enable_secrets_encryption', False),
+            'autoscaling': any(ng.get('max_size', 0) > ng.get('desired_size', 0) for ng in architecture.get('node_groups', [])),
+            'argocd': 'argocd' in architecture.get('addons', []),
+            'spot_instances': any(ng.get('capacity_type') == 'SPOT' for ng in architecture.get('node_groups', [])),
+            'graviton': any('g' in inst for ng in architecture.get('node_groups', []) for inst in ng.get('instance_types', [])),
+        }
+        
+        # Calculate WAF alignment using the existing analyzer
+        return ArchitectureUploadAnalyzer.calculate_waf_alignment(components)
+
+
+# ============================================================================
 # WAF PILLARS FOR ALIGNMENT SCORING
 # ============================================================================
 
@@ -833,11 +1254,14 @@ def init_eks_wizard_state():
         st.session_state.eks_cost_estimate = None
     if 'eks_generated_configs' not in st.session_state:
         st.session_state.eks_generated_configs = {}
-    # New: Architecture Upload & WAF Alignment
+    # Architecture Upload & WAF Alignment
     if 'eks_uploaded_architecture' not in st.session_state:
         st.session_state.eks_uploaded_architecture = None
     if 'eks_waf_alignment' not in st.session_state:
         st.session_state.eks_waf_alignment = None
+    # AI Generated Architecture
+    if 'eks_ai_generated_architecture' not in st.session_state:
+        st.session_state.eks_ai_generated_architecture = None
 
 # ============================================================================
 # MAIN RENDER FUNCTION
@@ -859,10 +1283,10 @@ class EKSArchitectureWizardModule:
             <div style="display: flex; justify-content: space-between; align-items: center;">
                 <div>
                     <h2 style="margin: 0; color: white;">🚀 EKS AI Architecture Design Wizard</h2>
-                    <p style="margin: 5px 0 0 0; opacity: 0.9;">Enterprise Kubernetes architecture with AI-powered recommendations & WAF alignment</p>
+                    <p style="margin: 5px 0 0 0; opacity: 0.9;">Enterprise Kubernetes architecture with AI-powered NLP design & WAF alignment</p>
                 </div>
                 <div style="text-align: right;">
-                    <span style="font-size: 1.2rem; font-weight: bold;">v2.3</span>
+                    <span style="font-size: 1.2rem; font-weight: bold;">v2.4</span>
                 </div>
             </div>
         </div>
@@ -914,28 +1338,289 @@ class EKSArchitectureWizardModule:
     
     @staticmethod
     def _render_upload_tab():
-        """Render Architecture Upload & WAF Analysis tab"""
+        """Render Architecture Upload & AI Design with WAF Analysis tab"""
         
-        st.markdown("### 📤 Upload Existing Architecture for WAF Analysis")
+        st.markdown("### 📤 Architecture Analysis & AI Design")
+        
+        # Input method selection
+        input_method = st.radio(
+            "Choose Input Method",
+            ["🤖 AI-Powered Design (NLP)", "📄 Upload Existing Architecture"],
+            horizontal=True,
+            help="Use AI to design from requirements, or upload existing IaC files for analysis"
+        )
+        
+        if input_method == "🤖 AI-Powered Design (NLP)":
+            EKSArchitectureWizardModule._render_nlp_design_section()
+        else:
+            EKSArchitectureWizardModule._render_upload_section()
+        
+        # Display WAF alignment results (shared by both methods)
+        if st.session_state.eks_waf_alignment:
+            EKSArchitectureWizardModule._render_waf_results()
+    
+    @staticmethod
+    def _render_nlp_design_section():
+        """Render the NLP-powered AI architecture design section"""
+        
+        st.markdown("""
+        **Describe your EKS requirements in plain English**, and AI will:
+        1. 🧠 Parse and understand your needs
+        2. 🏗️ Generate an optimized architecture
+        3. 📊 Score it against AWS Well-Architected Framework
+        4. 💡 Provide recommendations for improvement
+        """)
+        
+        # Example prompts
+        with st.expander("💡 Example Prompts (click to expand)"):
+            st.markdown("""
+            **Web Application:**
+            > "I need a production EKS cluster for 50 microservices handling 10,000 requests/second. 
+            > We need 99.99% uptime, PCI-DSS compliance, and a budget of $15,000/month. 
+            > Deploy in us-east-1 with GitOps and full observability."
+            
+            **Machine Learning:**
+            > "Set up an EKS cluster for ML training workloads. We need GPU nodes for TensorFlow 
+            > model training, spot instances for cost savings, and integration with SageMaker. 
+            > Development environment in us-west-2."
+            
+            **Cost-Optimized:**
+            > "Create a development EKS cluster for our dev team. We have 20 services, 
+            > low traffic, and want to minimize costs. Use spot instances wherever possible.
+            > Budget is $3,000/month."
+            
+            **High Availability:**
+            > "Mission-critical production cluster for our e-commerce platform. 
+            > HIPAA compliant, multi-AZ deployment, 99.99% SLA required. 
+            > 100 microservices, peak traffic during Black Friday."
+            """)
+        
+        # Requirements input
+        requirements_text = st.text_area(
+            "Describe your EKS architecture requirements:",
+            height=180,
+            placeholder="Example: I need a production EKS cluster for 30 microservices. We handle about 5,000 requests per second with 99.9% uptime requirement. Need PCI-DSS compliance, Prometheus monitoring, and GitOps deployment. Monthly budget around $10,000.",
+            help="Be as specific as possible about workloads, compliance, performance, and budget requirements"
+        )
+        
+        # Advanced options
+        with st.expander("⚙️ Advanced Options"):
+            col1, col2 = st.columns(2)
+            with col1:
+                use_ai_api = st.checkbox(
+                    "Use Claude AI for enhanced analysis",
+                    value=False,
+                    help="Uses Anthropic Claude API for more accurate requirement parsing (requires API key)"
+                )
+                if use_ai_api:
+                    api_key = st.text_input(
+                        "Anthropic API Key (optional)",
+                        type="password",
+                        help="Leave blank to use environment variable or Streamlit secrets"
+                    )
+            with col2:
+                target_region = st.selectbox(
+                    "Target AWS Region",
+                    ["Auto-detect", "us-east-1", "us-east-2", "us-west-2", "eu-west-1", "ap-southeast-1"],
+                    help="Override region detection from requirements"
+                )
+        
+        # Analyze button
+        if st.button("🚀 Generate Architecture & Analyze WAF Alignment", type="primary", use_container_width=True):
+            if not requirements_text.strip():
+                st.warning("⚠️ Please enter your requirements.")
+                return
+            
+            with st.spinner("🧠 AI is analyzing your requirements..."):
+                # Parse requirements
+                if use_ai_api:
+                    parsed = AIArchitectureDesigner.analyze_with_claude_api(
+                        requirements_text, 
+                        api_key if 'api_key' in dir() and api_key else None
+                    )
+                else:
+                    parsed = AIArchitectureDesigner.parse_requirements_locally(requirements_text)
+                
+                # Override region if specified
+                if target_region != "Auto-detect":
+                    parsed['region'] = target_region
+                
+                # Store parsed requirements
+                st.session_state.eks_parsed_requirements = parsed
+                
+                # Generate architecture
+                architecture = AIArchitectureDesigner.generate_architecture_from_requirements(parsed)
+                st.session_state.eks_cluster_config = architecture
+                st.session_state.eks_ai_generated_architecture = architecture
+                
+                # Calculate WAF alignment
+                waf_alignment = AIArchitectureDesigner.generate_waf_alignment_from_architecture(architecture)
+                st.session_state.eks_waf_alignment = waf_alignment
+                
+                st.success("✅ Architecture generated successfully!")
+        
+        # Display generated architecture
+        if st.session_state.get('eks_ai_generated_architecture'):
+            st.markdown("---")
+            st.markdown("## 🏗️ AI-Generated Architecture")
+            
+            arch = st.session_state.eks_ai_generated_architecture
+            parsed = st.session_state.get('eks_parsed_requirements', {})
+            
+            # Analysis source badge
+            analysis_source = parsed.get('analysis_source', 'Local Parser')
+            if analysis_source == 'Claude AI':
+                st.success(f"🤖 Analyzed by: **{analysis_source}**")
+            else:
+                st.info(f"🔧 Analyzed by: **{analysis_source}** (Enable Claude AI for enhanced analysis)")
+            
+            # Key metrics
+            st.markdown("### 📊 Architecture Overview")
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.metric("Cluster Name", arch.get('cluster_name', 'N/A')[:20])
+            with col2:
+                st.metric("Environment", arch.get('environment', 'N/A').title())
+            with col3:
+                st.metric("Region", arch.get('region', 'us-east-1'))
+            with col4:
+                st.metric("Est. Monthly Cost", f"${arch.get('estimated_monthly_cost', 0):,.0f}")
+            
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.metric("K8s Version", arch.get('kubernetes_version', '1.29'))
+            with col2:
+                total_nodes = sum(ng.get('desired_size', 0) for ng in arch.get('node_groups', []))
+                st.metric("Total Nodes", total_nodes)
+            with col3:
+                st.metric("Node Groups", len(arch.get('node_groups', [])))
+            with col4:
+                workload = arch.get('workload_type', 'N/A').replace('_', ' ').title()
+                st.metric("Workload Type", workload[:15])
+            
+            # Detected requirements
+            st.markdown("### 🎯 Detected Requirements")
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                st.markdown("**Performance:**")
+                st.write(f"- Estimated Pods: {parsed.get('estimated_pods', 'N/A')}")
+                st.write(f"- Requests/sec: {parsed.get('requests_per_second', 'N/A'):,}")
+                st.write(f"- Availability Target: {parsed.get('availability_target', 'N/A')}%")
+                st.write(f"- Monthly Budget: ${parsed.get('monthly_budget', 'N/A'):,}")
+            with col2:
+                st.markdown("**Compliance & Security:**")
+                compliance = arch.get('compliance', [])
+                if compliance:
+                    for c in compliance:
+                        st.write(f"- ✅ {c.upper().replace('_', '-')}")
+                else:
+                    st.write("- No specific compliance requirements detected")
+            
+            # Node Groups
+            st.markdown("### 🖥️ Recommended Node Groups")
+            
+            for ng in arch.get('node_groups', []):
+                capacity_badge = "🏷️ Spot" if ng.get('capacity_type') == 'SPOT' else "📦 On-Demand"
+                with st.expander(f"{capacity_badge} **{ng.get('name', 'node-group')}** - {ng.get('desired_size', 0)} nodes"):
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        st.write(f"**Instance Types:** {', '.join(ng.get('instance_types', []))}")
+                        st.write(f"**Capacity:** {ng.get('capacity_type', 'ON_DEMAND')}")
+                    with col2:
+                        st.write(f"**Min Size:** {ng.get('min_size', 0)}")
+                        st.write(f"**Max Size:** {ng.get('max_size', 0)}")
+                        st.write(f"**Desired:** {ng.get('desired_size', 0)}")
+                    with col3:
+                        labels = ng.get('labels', {})
+                        if labels:
+                            st.write("**Labels:**")
+                            for k, v in labels.items():
+                                st.write(f"  `{k}: {v}`")
+            
+            # Add-ons
+            st.markdown("### 📦 Recommended Add-ons")
+            addons = arch.get('addons', [])
+            addon_cols = st.columns(4)
+            for i, addon in enumerate(addons):
+                with addon_cols[i % 4]:
+                    st.markdown(f"✅ `{addon}`")
+            
+            # Security Configuration
+            with st.expander("🔒 Security Configuration"):
+                security = arch.get('security', {})
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.write(f"- Private Endpoint: {'✅' if security.get('private_endpoint') else '❌'}")
+                    st.write(f"- Public Endpoint: {'✅' if security.get('public_endpoint') else '❌'}")
+                    st.write(f"- Secrets Encryption: {'✅' if security.get('enable_secrets_encryption') else '❌'}")
+                    st.write(f"- Network Policies: {'✅' if security.get('enable_network_policies') else '❌'}")
+                with col2:
+                    st.write(f"- Audit Logging: {'✅' if security.get('enable_audit_logging') else '❌'}")
+                    st.write(f"- IRSA Enabled: {'✅' if security.get('enable_irsa') else '❌'}")
+                    st.write(f"- Pod Security Standards: `{security.get('pod_security_standards', 'baseline')}`")
+                    st.write(f"- GuardDuty: {'✅' if security.get('enable_guardduty') else '❌'}")
+            
+            # Observability Configuration
+            with st.expander("📊 Observability Configuration"):
+                obs = arch.get('observability', {})
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.write(f"- Container Insights: {'✅' if obs.get('enable_container_insights') else '❌'}")
+                    st.write(f"- Prometheus: {'✅' if obs.get('enable_prometheus') else '❌'}")
+                    st.write(f"- Grafana: {'✅' if obs.get('enable_grafana') else '❌'}")
+                with col2:
+                    st.write(f"- Distributed Tracing: {'✅' if obs.get('enable_distributed_tracing') else '❌'}")
+                    st.write(f"- Log Retention: {obs.get('log_retention_days', 30)} days")
+            
+            # Export options
+            st.markdown("### 📥 Export Generated Architecture")
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                arch_json = json.dumps(arch, indent=2, default=str)
+                st.download_button(
+                    "📄 Download Config (JSON)",
+                    arch_json,
+                    f"{arch.get('cluster_name', 'eks')}-config.json",
+                    "application/json",
+                    use_container_width=True
+                )
+            with col2:
+                arch_yaml = yaml.dump(arch, default_flow_style=False)
+                st.download_button(
+                    "📄 Download Config (YAML)",
+                    arch_yaml,
+                    f"{arch.get('cluster_name', 'eks')}-config.yaml",
+                    "text/yaml",
+                    use_container_width=True
+                )
+            with col3:
+                if st.button("➡️ Use in Architecture Tab", use_container_width=True):
+                    st.success("✅ Configuration loaded! Go to the Architecture tab to customize.")
+    
+    @staticmethod
+    def _render_upload_section():
+        """Render the file upload section for existing architectures"""
+        
         st.markdown("""
         Upload your existing EKS architecture documents (Terraform, CloudFormation, or text descriptions) 
-        to analyze alignment with **AWS Well-Architected Framework** pillars and get actionable recommendations.
+        to analyze alignment with **AWS Well-Architected Framework** pillars.
         """)
         
         # Upload type selection
         upload_type = st.radio(
             "Select Upload Type",
-            ["📄 Terraform (.tf)", "📄 CloudFormation (.yaml/.json)", "📝 Text/Markdown Description", "📋 Architecture Document (.docx)"],
+            ["📄 Terraform (.tf)", "📄 CloudFormation (.yaml/.json)", "📝 Text/Markdown Description"],
             horizontal=True
         )
         
         # File uploader
-        file_types = ['tf'] if 'Terraform' in upload_type else ['yaml', 'yml', 'json'] if 'CloudFormation' in upload_type else ['md', 'txt'] if 'Text' in upload_type else ['docx', 'doc', 'pdf']
+        file_types = ['tf'] if 'Terraform' in upload_type else ['yaml', 'yml', 'json'] if 'CloudFormation' in upload_type else ['md', 'txt']
         
         uploaded_file = st.file_uploader(
             "Upload your architecture file",
-            type=file_types + ['tf', 'yaml', 'yml', 'json', 'md', 'txt'],  # Accept all common types
-            help="Upload Terraform, CloudFormation, text description, or architecture document"
+            type=file_types + ['tf', 'yaml', 'yml', 'json', 'md', 'txt'],
+            help="Upload Terraform, CloudFormation, or text description"
         )
         
         # Or paste content directly
@@ -972,7 +1657,7 @@ class EKSArchitectureWizardModule:
             
             **Text Description Example:**
             > "Our EKS cluster runs in us-east-1 across 3 AZs with Karpenter for auto-scaling. 
-            > We use ALB for ingress, Prometheus/Grafana for monitoring, and ArgoCD for GitOps deployments.
+            > We use ALB for ingress, Prometheus/Grafana for monitoring, and ArgoCD for GitOps.
             > All data is encrypted with KMS, and we use IRSA for pod-level IAM permissions."
             """)
         
@@ -1008,178 +1693,163 @@ class EKSArchitectureWizardModule:
                     waf_alignment = ArchitectureUploadAnalyzer.calculate_waf_alignment(components)
                     st.session_state.eks_waf_alignment = waf_alignment
                     
+                    # Clear AI-generated architecture flag
+                    st.session_state.eks_ai_generated_architecture = None
+                    
                     st.success(f"✅ Architecture analysis complete! (Analyzed as: {analysis_type})")
             else:
                 st.warning("⚠️ Please upload a file or paste content to analyze.")
+    
+    @staticmethod
+    def _render_waf_results():
+        """Render WAF alignment results (shared by both input methods)"""
         
-        # Display WAF alignment results
-        if st.session_state.eks_waf_alignment:
-            st.markdown("---")
-            st.markdown("## 📊 WAF Alignment Results")
-            
-            alignment = st.session_state.eks_waf_alignment
-            overall_score = alignment.get('overall_score', 0)
-            
-            # Overall score gauge with color coding
-            if overall_score >= 80:
-                score_color = "#4CAF50"  # Green
-                score_level = "Excellent"
-                score_emoji = "🏆"
-            elif overall_score >= 60:
-                score_color = "#FF9800"  # Orange
-                score_level = "Good"
-                score_emoji = "✅"
-            elif overall_score >= 40:
-                score_color = "#FF5722"  # Deep Orange
-                score_level = "Needs Improvement"
-                score_emoji = "⚠️"
-            else:
-                score_color = "#F44336"  # Red
-                score_level = "Critical Gaps"
-                score_emoji = "🚨"
-            
-            st.markdown(f"""
-            <div style="text-align: center; padding: 25px; background: linear-gradient(135deg, {score_color} 0%, {score_color}dd 100%); 
-                        border-radius: 15px; color: white; margin-bottom: 25px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
-                <div style="font-size: 4rem; font-weight: bold; text-shadow: 2px 2px 4px rgba(0,0,0,0.2);">{overall_score:.0f}%</div>
-                <div style="font-size: 1.5rem; margin-top: 5px;">{score_emoji} {score_level}</div>
-                <div style="font-size: 1rem; opacity: 0.9; margin-top: 10px;">Overall WAF Alignment Score</div>
-            </div>
-            """, unsafe_allow_html=True)
-            
-            # Pillar-by-Pillar Analysis
-            st.markdown("### 📈 Pillar-by-Pillar Analysis")
-            
-            # Create 3 columns for 6 pillars (2 rows)
-            pillars_list = list(alignment.get('pillars', {}).items())
-            
-            for row in range(2):
-                cols = st.columns(3)
-                for col_idx in range(3):
-                    pillar_idx = row * 3 + col_idx
-                    if pillar_idx < len(pillars_list):
-                        pillar_key, pillar_data = pillars_list[pillar_idx]
-                        pillar_info = WAF_PILLARS.get(pillar_key, {})
-                        pillar_name = pillar_info.get('name', pillar_key.replace('_', ' ').title())
-                        pillar_icon = pillar_info.get('icon', '📋')
-                        pillar_color = pillar_info.get('color', '#666')
-                        score = pillar_data.get('score', 0)
-                        
-                        # Determine score color
-                        if score >= 80:
-                            border_color = "#4CAF50"
-                        elif score >= 60:
-                            border_color = "#FF9800"
-                        else:
-                            border_color = "#F44336"
-                        
-                        with cols[col_idx]:
-                            st.markdown(f"""
-                            <div style="padding: 15px; background: #f8f9fa; border-radius: 10px; 
-                                        border-left: 5px solid {border_color}; margin-bottom: 15px;
-                                        box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
-                                <div style="font-size: 1.1rem; font-weight: bold; color: #333;">
-                                    {pillar_icon} {pillar_name}
-                                </div>
-                                <div style="font-size: 2rem; font-weight: bold; color: {border_color}; margin: 10px 0;">
-                                    {score:.0f}%
-                                </div>
-                                <div style="font-size: 0.8rem; color: #666;">
-                                    {sum(pillar_data.get('checks', {}).values())}/{len(pillar_data.get('checks', {}))} checks passed
-                                </div>
+        st.markdown("---")
+        st.markdown("## 📊 WAF Alignment Results")
+        
+        alignment = st.session_state.eks_waf_alignment
+        overall_score = alignment.get('overall_score', 0)
+        
+        # Overall score gauge with color coding
+        if overall_score >= 80:
+            score_color = "#4CAF50"
+            score_level = "Excellent"
+            score_emoji = "🏆"
+        elif overall_score >= 60:
+            score_color = "#FF9800"
+            score_level = "Good"
+            score_emoji = "✅"
+        elif overall_score >= 40:
+            score_color = "#FF5722"
+            score_level = "Needs Improvement"
+            score_emoji = "⚠️"
+        else:
+            score_color = "#F44336"
+            score_level = "Critical Gaps"
+            score_emoji = "🚨"
+        
+        st.markdown(f"""
+        <div style="text-align: center; padding: 25px; background: linear-gradient(135deg, {score_color} 0%, {score_color}dd 100%); 
+                    border-radius: 15px; color: white; margin-bottom: 25px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+            <div style="font-size: 4rem; font-weight: bold; text-shadow: 2px 2px 4px rgba(0,0,0,0.2);">{overall_score:.0f}%</div>
+            <div style="font-size: 1.5rem; margin-top: 5px;">{score_emoji} {score_level}</div>
+            <div style="font-size: 1rem; opacity: 0.9; margin-top: 10px;">Overall WAF Alignment Score</div>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        # Pillar-by-Pillar Analysis
+        st.markdown("### 📈 Pillar-by-Pillar Analysis")
+        
+        pillars_list = list(alignment.get('pillars', {}).items())
+        
+        for row in range(2):
+            cols = st.columns(3)
+            for col_idx in range(3):
+                pillar_idx = row * 3 + col_idx
+                if pillar_idx < len(pillars_list):
+                    pillar_key, pillar_data = pillars_list[pillar_idx]
+                    pillar_info = WAF_PILLARS.get(pillar_key, {})
+                    pillar_name = pillar_info.get('name', pillar_key.replace('_', ' ').title())
+                    pillar_icon = pillar_info.get('icon', '📋')
+                    score = pillar_data.get('score', 0)
+                    
+                    if score >= 80:
+                        border_color = "#4CAF50"
+                    elif score >= 60:
+                        border_color = "#FF9800"
+                    else:
+                        border_color = "#F44336"
+                    
+                    with cols[col_idx]:
+                        st.markdown(f"""
+                        <div style="padding: 15px; background: #f8f9fa; border-radius: 10px; 
+                                    border-left: 5px solid {border_color}; margin-bottom: 15px;
+                                    box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
+                            <div style="font-size: 1.1rem; font-weight: bold; color: #333;">
+                                {pillar_icon} {pillar_name}
                             </div>
-                            """, unsafe_allow_html=True)
-            
-            # Detailed Recommendations
-            st.markdown("### 💡 Recommendations for Improvement")
-            
-            all_recommendations = []
-            for pillar_key, pillar_data in alignment.get('pillars', {}).items():
-                pillar_info = WAF_PILLARS.get(pillar_key, {})
-                pillar_name = pillar_info.get('name', pillar_key.replace('_', ' ').title())
-                pillar_icon = pillar_info.get('icon', '📋')
-                for rec in pillar_data.get('recommendations', []):
-                    all_recommendations.append({
-                        'pillar': pillar_name,
-                        'icon': pillar_icon,
-                        'recommendation': rec,
-                        'score': pillar_data.get('score', 0)
-                    })
-            
-            # Sort by pillar score (lowest first - most critical)
-            all_recommendations.sort(key=lambda x: x['score'])
-            
-            if all_recommendations:
-                for i, rec in enumerate(all_recommendations):
-                    priority = "🔴 High" if rec['score'] < 40 else "🟡 Medium" if rec['score'] < 70 else "🟢 Low"
-                    with st.expander(f"{priority} | {rec['icon']} {rec['pillar']}: {rec['recommendation'][:60]}..."):
-                        st.markdown(f"**Pillar:** {rec['icon']} {rec['pillar']}")
-                        st.markdown(f"**Current Score:** {rec['score']:.0f}%")
-                        st.markdown(f"**Recommendation:** {rec['recommendation']}")
-                        st.markdown("---")
-                        st.markdown("**Why this matters:**")
-                        if 'security' in rec['pillar'].lower():
-                            st.info("🔒 Security gaps can lead to data breaches, compliance failures, and reputational damage.")
-                        elif 'cost' in rec['pillar'].lower():
-                            st.info("💰 Cost optimization can reduce your AWS bill by 30-50% without impacting performance.")
-                        elif 'reliability' in rec['pillar'].lower():
-                            st.info("🛡️ Reliability improvements increase uptime and reduce incident response time.")
-                        elif 'performance' in rec['pillar'].lower():
-                            st.info("⚡ Performance optimizations improve user experience and reduce latency.")
-                        elif 'operational' in rec['pillar'].lower():
-                            st.info("⚙️ Operational excellence reduces toil and improves deployment velocity.")
-                        elif 'sustainability' in rec['pillar'].lower():
-                            st.info("🌱 Sustainability improvements reduce carbon footprint and can lower costs.")
-            else:
-                st.success("🎉 Excellent! No critical recommendations - your architecture is well-aligned with WAF best practices!")
-            
-            # Detected Components Summary
-            with st.expander("🔍 Detected Architecture Components"):
-                components = alignment.get('components_detected', {})
-                detected = [k for k, v in components.items() if v]
-                not_detected = [k for k, v in components.items() if not v]
-                
-                col1, col2 = st.columns(2)
-                with col1:
-                    st.markdown("**✅ Detected Components:**")
-                    if detected:
-                        for comp in sorted(detected):
-                            st.markdown(f"- {comp.replace('_', ' ').title()}")
-                    else:
-                        st.markdown("*No components detected*")
-                with col2:
-                    st.markdown("**❌ Not Detected (Consider Adding):**")
-                    if not_detected:
-                        for comp in sorted(not_detected)[:10]:
-                            st.markdown(f"- {comp.replace('_', ' ').title()}")
-                    else:
-                        st.markdown("*All key components detected!*")
-            
-            # Export Report
-            st.markdown("---")
-            st.markdown("### 📥 Export WAF Analysis Report")
+                            <div style="font-size: 2rem; font-weight: bold; color: {border_color}; margin: 10px 0;">
+                                {score:.0f}%
+                            </div>
+                            <div style="font-size: 0.8rem; color: #666;">
+                                {sum(pillar_data.get('checks', {}).values())}/{len(pillar_data.get('checks', {}))} checks passed
+                            </div>
+                        </div>
+                        """, unsafe_allow_html=True)
+        
+        # Detailed Recommendations
+        st.markdown("### 💡 Recommendations for Improvement")
+        
+        all_recommendations = []
+        for pillar_key, pillar_data in alignment.get('pillars', {}).items():
+            pillar_info = WAF_PILLARS.get(pillar_key, {})
+            pillar_name = pillar_info.get('name', pillar_key.replace('_', ' ').title())
+            pillar_icon = pillar_info.get('icon', '📋')
+            for rec in pillar_data.get('recommendations', []):
+                all_recommendations.append({
+                    'pillar': pillar_name,
+                    'icon': pillar_icon,
+                    'recommendation': rec,
+                    'score': pillar_data.get('score', 0)
+                })
+        
+        all_recommendations.sort(key=lambda x: x['score'])
+        
+        if all_recommendations:
+            for rec in all_recommendations[:8]:  # Show top 8 recommendations
+                priority = "🔴 High" if rec['score'] < 40 else "🟡 Medium" if rec['score'] < 70 else "🟢 Low"
+                with st.expander(f"{priority} | {rec['icon']} {rec['pillar']}: {rec['recommendation'][:60]}..."):
+                    st.markdown(f"**Pillar:** {rec['icon']} {rec['pillar']}")
+                    st.markdown(f"**Current Score:** {rec['score']:.0f}%")
+                    st.markdown(f"**Recommendation:** {rec['recommendation']}")
+        else:
+            st.success("🎉 Excellent! No critical recommendations - your architecture is well-aligned with WAF best practices!")
+        
+        # Detected Components Summary
+        with st.expander("🔍 Detected Architecture Components"):
+            components = alignment.get('components_detected', {})
+            detected = [k for k, v in components.items() if v]
+            not_detected = [k for k, v in components.items() if not v]
             
             col1, col2 = st.columns(2)
             with col1:
-                report_json = json.dumps({
-                    'analysis_date': datetime.now().isoformat(),
-                    'overall_score': overall_score,
-                    'score_level': score_level,
-                    'pillars': {k: {'score': v['score'], 'recommendations': v['recommendations']} 
-                               for k, v in alignment.get('pillars', {}).items()},
-                    'components_detected': alignment.get('components_detected', {})
-                }, indent=2)
-                st.download_button(
-                    "📄 Download Report (JSON)",
-                    report_json,
-                    "waf-alignment-report.json",
-                    "application/json",
-                    use_container_width=True
-                )
+                st.markdown("**✅ Detected Components:**")
+                if detected:
+                    for comp in sorted(detected):
+                        st.markdown(f"- {comp.replace('_', ' ').title()}")
+                else:
+                    st.markdown("*No components detected*")
             with col2:
-                # Create markdown report
-                report_md = f"""# WAF Alignment Report
-                
+                st.markdown("**❌ Not Detected (Consider Adding):**")
+                if not_detected:
+                    for comp in sorted(not_detected)[:10]:
+                        st.markdown(f"- {comp.replace('_', ' ').title()}")
+                else:
+                    st.markdown("*All key components detected!*")
+        
+        # Export Report
+        st.markdown("### 📥 Export WAF Analysis Report")
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            report_json = json.dumps({
+                'analysis_date': datetime.now().isoformat(),
+                'overall_score': overall_score,
+                'score_level': score_level,
+                'pillars': {k: {'score': v['score'], 'recommendations': v['recommendations']} 
+                           for k, v in alignment.get('pillars', {}).items()},
+                'components_detected': alignment.get('components_detected', {})
+            }, indent=2)
+            st.download_button(
+                "📄 Download Report (JSON)",
+                report_json,
+                "waf-alignment-report.json",
+                "application/json",
+                use_container_width=True
+            )
+        with col2:
+            report_md = f"""# WAF Alignment Report
+
 **Analysis Date:** {datetime.now().strftime('%Y-%m-%d %H:%M')}
 
 ## Overall Score: {overall_score:.0f}% ({score_level})
@@ -1189,24 +1859,24 @@ class EKSArchitectureWizardModule:
 | Pillar | Score | Status |
 |--------|-------|--------|
 """
-                for pillar_key, pillar_data in alignment.get('pillars', {}).items():
-                    pillar_info = WAF_PILLARS.get(pillar_key, {})
-                    pillar_name = pillar_info.get('name', pillar_key)
-                    score = pillar_data.get('score', 0)
-                    status = "✅ Good" if score >= 80 else "⚠️ Needs Work" if score >= 60 else "❌ Critical"
-                    report_md += f"| {pillar_name} | {score:.0f}% | {status} |\n"
-                
-                report_md += "\n## Recommendations\n\n"
-                for rec in all_recommendations:
-                    report_md += f"- **{rec['pillar']}**: {rec['recommendation']}\n"
-                
-                st.download_button(
-                    "📄 Download Report (Markdown)",
-                    report_md,
-                    "waf-alignment-report.md",
-                    "text/markdown",
-                    use_container_width=True
-                )
+            for pillar_key, pillar_data in alignment.get('pillars', {}).items():
+                pillar_info = WAF_PILLARS.get(pillar_key, {})
+                pillar_name = pillar_info.get('name', pillar_key)
+                score = pillar_data.get('score', 0)
+                status = "✅ Good" if score >= 80 else "⚠️ Needs Work" if score >= 60 else "❌ Critical"
+                report_md += f"| {pillar_name} | {score:.0f}% | {status} |\n"
+            
+            report_md += "\n## Recommendations\n\n"
+            for rec in all_recommendations:
+                report_md += f"- **{rec['pillar']}**: {rec['recommendation']}\n"
+            
+            st.download_button(
+                "📄 Download Report (Markdown)",
+                report_md,
+                "waf-alignment-report.md",
+                "text/markdown",
+                use_container_width=True
+            )
     
     @staticmethod
     def _render_requirements_tab():
