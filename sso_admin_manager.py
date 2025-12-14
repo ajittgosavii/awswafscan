@@ -295,26 +295,15 @@ class AuditLog:
 # ============================================================================
 
 class LocalUserStore:
-    """Local user store for demo mode or when Firebase is not configured"""
+    """Local user store - requires initial admin setup via secrets.toml"""
     
     def __init__(self):
         if 'local_users' not in st.session_state:
-            # Initialize with default admin user
-            st.session_state.local_users = {
-                'admin@wafscanner.local': {
-                    'uid': 'admin-001',
-                    'email': 'admin@wafscanner.local',
-                    'password_hash': self._hash_password('Admin@123'),
-                    'display_name': 'System Administrator',
-                    'role': 'super_admin',
-                    'organization_id': 'default-org',
-                    'created_at': datetime.now().isoformat(),
-                    'created_by': 'system',
-                    'last_login': None,
-                    'active': True,
-                    'email_verified': True,
-                }
-            }
+            # Initialize empty - admin must be configured in secrets.toml
+            st.session_state.local_users = {}
+            
+            # Try to load initial admin from secrets
+            self._load_admin_from_secrets()
         
         if 'local_organizations' not in st.session_state:
             st.session_state.local_organizations = {
@@ -331,6 +320,64 @@ class LocalUserStore:
         
         if 'audit_logs' not in st.session_state:
             st.session_state.audit_logs = []
+        
+        if 'initial_setup_done' not in st.session_state:
+            st.session_state.initial_setup_done = len(st.session_state.local_users) > 0
+    
+    def _load_admin_from_secrets(self):
+        """Load initial admin user from secrets.toml"""
+        try:
+            if hasattr(st, 'secrets') and 'admin' in st.secrets:
+                admin_config = st.secrets['admin']
+                email = admin_config.get('email')
+                password = admin_config.get('password')
+                name = admin_config.get('name', 'Administrator')
+                
+                if email and password:
+                    st.session_state.local_users[email] = {
+                        'uid': 'admin-001',
+                        'email': email,
+                        'password_hash': self._hash_password(password),
+                        'display_name': name,
+                        'role': 'super_admin',
+                        'organization_id': 'default-org',
+                        'created_at': datetime.now().isoformat(),
+                        'created_by': 'system',
+                        'last_login': None,
+                        'active': True,
+                        'email_verified': True,
+                    }
+        except Exception:
+            pass
+    
+    def has_users(self) -> bool:
+        """Check if any users exist"""
+        return len(st.session_state.local_users) > 0
+    
+    def create_initial_admin(self, email: str, password: str, name: str) -> Tuple[bool, str]:
+        """Create the initial admin user (only if no users exist)"""
+        if self.has_users():
+            return False, "Admin user already exists"
+        
+        if len(password) < 8:
+            return False, "Password must be at least 8 characters"
+        
+        st.session_state.local_users[email] = {
+            'uid': 'admin-001',
+            'email': email,
+            'password_hash': self._hash_password(password),
+            'display_name': name,
+            'role': 'super_admin',
+            'organization_id': 'default-org',
+            'created_at': datetime.now().isoformat(),
+            'created_by': 'initial_setup',
+            'last_login': None,
+            'active': True,
+            'email_verified': True,
+        }
+        
+        st.session_state.initial_setup_done = True
+        return True, "Admin user created successfully"
     
     def _hash_password(self, password: str) -> str:
         """Hash password with salt"""
@@ -774,11 +821,139 @@ def get_auth_manager() -> SSOAuthManager:
 
 
 # ============================================================================
+# INITIAL SETUP PAGE
+# ============================================================================
+
+def render_initial_setup_page():
+    """Render the initial admin setup page (first-time setup)"""
+    
+    # Professional CSS
+    st.markdown("""
+    <style>
+    [data-testid="stSidebar"] { display: none !important; }
+    .stApp { background: linear-gradient(180deg, #f8f9fa 0%, #ffffff 100%); }
+    button[kind="primary"], .stFormSubmitButton > button {
+        background: linear-gradient(135deg, #007CC3 0%, #0066A1 100%) !important;
+        border: none !important; color: white !important;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+    
+    col1, col2, col3 = st.columns([1, 2, 1])
+    
+    with col2:
+        # Header
+        st.markdown("""
+        <div style="text-align: center; margin-bottom: 25px; margin-top: 30px;">
+            <div style="display: inline-block; padding: 8px 20px; background: linear-gradient(135deg, #007CC3 0%, #0066A1 100%); border-radius: 6px;">
+                <span style="font-size: 28px; font-weight: 700; color: white; letter-spacing: 3px;">INFOSYS</span>
+            </div>
+        </div>
+        <div style="text-align: center; margin-bottom: 30px;">
+            <h1 style="color: #232F3E; margin: 0; font-size: 24px; font-weight: 600;">
+                Initial Setup Required
+            </h1>
+            <p style="color: #6c757d; font-size: 14px; margin-top: 8px;">
+                Create the first administrator account to get started
+            </p>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        # Setup form
+        st.markdown("""
+        <div style="background: #fff3cd; padding: 15px; border-radius: 6px; border: 1px solid #ffc107; margin-bottom: 20px;">
+            <p style="color: #856404; font-size: 13px; margin: 0;">
+                <strong>⚠️ Important:</strong> This page only appears once. Save your credentials securely!
+            </p>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        with st.form("initial_setup_form"):
+            st.markdown("##### Administrator Details")
+            
+            admin_name = st.text_input(
+                "Full Name *",
+                placeholder="Administrator Name",
+                help="Display name for the admin account"
+            )
+            
+            admin_email = st.text_input(
+                "Email Address *",
+                placeholder="admin@company.com",
+                help="This will be your login email"
+            )
+            
+            admin_password = st.text_input(
+                "Password *",
+                type="password",
+                placeholder="Minimum 8 characters",
+                help="Choose a strong password"
+            )
+            
+            admin_password_confirm = st.text_input(
+                "Confirm Password *",
+                type="password",
+                placeholder="Re-enter password"
+            )
+            
+            st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True)
+            
+            submitted = st.form_submit_button("Create Administrator Account", type="primary", use_container_width=True)
+            
+            if submitted:
+                # Validation
+                if not all([admin_name, admin_email, admin_password, admin_password_confirm]):
+                    st.error("All fields are required")
+                elif '@' not in admin_email:
+                    st.error("Please enter a valid email address")
+                elif len(admin_password) < 8:
+                    st.error("Password must be at least 8 characters")
+                elif admin_password != admin_password_confirm:
+                    st.error("Passwords do not match")
+                else:
+                    # Create admin
+                    auth_mgr = get_auth_manager()
+                    success, message = auth_mgr.local_store.create_initial_admin(
+                        admin_email, admin_password, admin_name
+                    )
+                    
+                    if success:
+                        st.success("Administrator account created successfully!")
+                        st.info("Please sign in with your new credentials.")
+                        import time
+                        time.sleep(2)
+                        st.rerun()
+                    else:
+                        st.error(message)
+        
+        # Alternative: Configure via secrets
+        with st.expander("Alternative: Configure via secrets.toml"):
+            st.markdown("""
+            You can also configure the initial admin in your `.streamlit/secrets.toml` file:
+            
+            ```toml
+            [admin]
+            email = "admin@company.com"
+            password = "YourSecurePassword123"
+            name = "Administrator"
+            ```
+            
+            This is recommended for production deployments.
+            """)
+
+
+# ============================================================================
 # STREAMLIT UI COMPONENTS
 # ============================================================================
 
 def render_login_page():
     """Render the full-screen professional login page with Infosys branding"""
+    
+    # Check if initial setup is needed
+    auth_mgr = get_auth_manager()
+    if not auth_mgr.local_store.has_users() and not auth_mgr.firebase_available:
+        render_initial_setup_page()
+        return
     
     # Professional CSS - Infosys Blue (#007CC3) and clean white theme
     st.markdown("""
@@ -793,27 +968,38 @@ def render_login_page():
         background: linear-gradient(180deg, #f8f9fa 0%, #ffffff 100%);
     }
     
-    /* Professional button styling - Infosys Blue */
-    .stButton > button[kind="primary"] {
+    /* ========== BUTTON STYLING - Infosys Blue ========== */
+    /* Primary buttons */
+    button[kind="primary"],
+    button[data-testid="baseButton-primary"],
+    .stButton > button,
+    .stFormSubmitButton > button,
+    button[type="submit"] {
         background: linear-gradient(135deg, #007CC3 0%, #0066A1 100%) !important;
+        background-color: #007CC3 !important;
         border: none !important;
         color: white !important;
         font-weight: 500 !important;
         border-radius: 6px !important;
-        padding: 0.5rem 1rem !important;
     }
     
-    .stButton > button[kind="primary"]:hover {
+    button[kind="primary"]:hover,
+    button[data-testid="baseButton-primary"]:hover,
+    .stButton > button:hover,
+    .stFormSubmitButton > button:hover {
         background: linear-gradient(135deg, #0066A1 0%, #005080 100%) !important;
+        background-color: #0066A1 !important;
     }
     
-    .stButton > button[kind="secondary"] {
+    /* Secondary buttons */
+    button[kind="secondary"],
+    button[data-testid="baseButton-secondary"] {
         background: #ffffff !important;
         border: 1px solid #007CC3 !important;
         color: #007CC3 !important;
     }
     
-    /* Form styling */
+    /* ========== FORM STYLING ========== */
     .stTextInput > div > div > input {
         border: 1px solid #dee2e6 !important;
         border-radius: 6px !important;
@@ -824,20 +1010,46 @@ def render_login_page():
         box-shadow: 0 0 0 2px rgba(0, 124, 195, 0.1) !important;
     }
     
-    /* Professional alert colors */
-    .stSuccess {
+    /* ========== CHECKBOX STYLING - Infosys Blue ========== */
+    /* Checkbox checked state */
+    .stCheckbox input[type="checkbox"]:checked + div,
+    .stCheckbox [data-checked="true"],
+    div[data-testid="stCheckbox"] > label > div:first-child,
+    .stCheckbox span[data-checked="true"] {
+        background-color: #007CC3 !important;
+        border-color: #007CC3 !important;
+    }
+    
+    /* Checkbox SVG icon */
+    .stCheckbox svg {
+        fill: #007CC3 !important;
+    }
+    
+    /* Checkbox container when checked */
+    [data-baseweb="checkbox"] input:checked ~ div {
+        background-color: #007CC3 !important;
+        border-color: #007CC3 !important;
+    }
+    
+    /* ========== ALERT STYLING ========== */
+    .stSuccess, [data-testid="stNotification"][data-variant="success"] {
         background-color: #d4edda !important;
         border-left-color: #28a745 !important;
     }
     
-    .stWarning {
+    .stWarning, [data-testid="stNotification"][data-variant="warning"] {
         background-color: #fff3cd !important;
         border-left-color: #ffc107 !important;
     }
     
-    .stError {
+    .stError, [data-testid="stNotification"][data-variant="error"] {
         background-color: #f8d7da !important;
-        border-left-color: #dc3545 !important;
+        border-left-color: #c0392b !important;
+    }
+    
+    .stInfo, [data-testid="stNotification"][data-variant="info"] {
+        background-color: #e3f2fd !important;
+        border-left-color: #007CC3 !important;
     }
     </style>
     """, unsafe_allow_html=True)
@@ -846,13 +1058,12 @@ def render_login_page():
     col1, col2, col3 = st.columns([1, 2, 1])
     
     with col2:
-        # Infosys Logo and Professional Header
+        # Infosys Text Logo - Professional and reliable
         st.markdown("""
-        <div style="text-align: center; margin-bottom: 25px; margin-top: 20px;">
-            <!-- Infosys Logo -->
-            <img src="https://logos-world.net/wp-content/uploads/2020/12/Infosys-Logo.png" 
-                 alt="Infosys" 
-                 style="height: 45px; margin-bottom: 20px;">
+        <div style="text-align: center; margin-bottom: 25px; margin-top: 30px;">
+            <div style="display: inline-block; padding: 8px 20px; background: linear-gradient(135deg, #007CC3 0%, #0066A1 100%); border-radius: 6px;">
+                <span style="font-size: 28px; font-weight: 700; color: white; letter-spacing: 3px;">INFOSYS</span>
+            </div>
         </div>
         """, unsafe_allow_html=True)
         
@@ -920,7 +1131,7 @@ def render_login_page():
                     
                     if success and user:
                         SessionManager.login(user)
-                        st.success(f"Welcome, {user.display_name}! Redirecting...")
+                        st.success(f"Welcome, {user.display_name}!")
                         import time
                         time.sleep(0.7)
                         st.rerun()
@@ -929,24 +1140,8 @@ def render_login_page():
         
         st.markdown("</div>", unsafe_allow_html=True)
         
-        # Demo credentials section
-        st.markdown("<div style='height: 15px;'></div>", unsafe_allow_html=True)
-        
-        with st.expander("Demo Access Credentials"):
-            st.markdown("""
-            **Admin Account for Demo:**
-            
-            | Field | Value |
-            |-------|-------|
-            | Email | `admin@wafscanner.local` |
-            | Password | `Admin@123` |
-            | Access Level | Super Admin (Full Access) |
-            
-            *You can create users with different roles after login.*
-            """)
-        
         # Features section
-        st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True)
+        st.markdown("<div style='height: 20px;'></div>", unsafe_allow_html=True)
         
         st.markdown("""
         <div style="background: #f8f9fa; padding: 18px 20px; border-radius: 6px; border: 1px solid #e9ecef;">
@@ -961,6 +1156,15 @@ def render_login_page():
                 <div>✓ PDF Reports</div>
                 <div>✓ Architecture Designer</div>
             </div>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        # Contact admin info
+        st.markdown("""
+        <div style="text-align: center; margin-top: 20px; padding: 15px; background: #e3f2fd; border-radius: 6px; border: 1px solid #007CC3;">
+            <p style="color: #007CC3; font-size: 13px; margin: 0;">
+                <strong>Need Access?</strong> Contact your system administrator.
+            </p>
         </div>
         """, unsafe_allow_html=True)
         

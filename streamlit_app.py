@@ -162,40 +162,60 @@ def render_header():
     
     /* Fix primary button colors - Use Infosys Blue instead of red */
     .stButton > button[kind="primary"] {
+    /* ========== BUTTON STYLING - Infosys Blue ========== */
+    /* Primary buttons - comprehensive selectors */
+    button[kind="primary"],
+    button[data-testid="baseButton-primary"],
+    .stButton > button,
+    .stFormSubmitButton > button,
+    button[type="submit"] {
         background: linear-gradient(135deg, #007CC3 0%, #0066A1 100%) !important;
+        background-color: #007CC3 !important;
         border: none !important;
+        color: white !important;
     }
     
-    .stButton > button[kind="primary"]:hover {
+    button[kind="primary"]:hover,
+    button[data-testid="baseButton-primary"]:hover,
+    .stButton > button:hover,
+    .stFormSubmitButton > button:hover {
         background: linear-gradient(135deg, #0066A1 0%, #005080 100%) !important;
+        background-color: #0066A1 !important;
     }
     
-    /* Fix form submit buttons */
-    .stFormSubmitButton > button {
-        background: linear-gradient(135deg, #007CC3 0%, #0066A1 100%) !important;
-        border: none !important;
+    /* Secondary buttons */
+    button[kind="secondary"],
+    button[data-testid="baseButton-secondary"] {
+        background: #ffffff !important;
+        border: 1px solid #007CC3 !important;
+        color: #007CC3 !important;
     }
     
+    /* ========== ALERT STYLING ========== */
     /* Success messages - Professional green */
-    .stSuccess, div[data-baseweb="notification"][kind="positive"] {
+    .stSuccess, div[data-baseweb="notification"][kind="positive"],
+    [data-testid="stNotification"][data-variant="success"] {
         background-color: #d4edda !important;
         border-left-color: #28a745 !important;
     }
     
     /* Warning messages - Amber/Orange */
-    .stWarning, div[data-baseweb="notification"][kind="warning"] {
+    .stWarning, div[data-baseweb="notification"][kind="warning"],
+    [data-testid="stNotification"][data-variant="warning"] {
         background-color: #fff3cd !important;
         border-left-color: #ffc107 !important;
     }
     
     /* Error messages - Softer red */
-    .stError, div[data-baseweb="notification"][kind="negative"] {
+    .stError, div[data-baseweb="notification"][kind="negative"],
+    [data-testid="stNotification"][data-variant="error"] {
         background-color: #f8d7da !important;
         border-left-color: #c0392b !important;
     }
     
     /* Info messages - Infosys Blue */
-    .stInfo, div[data-baseweb="notification"][kind="info"] {
+    .stInfo, div[data-baseweb="notification"][kind="info"],
+    [data-testid="stNotification"][data-variant="info"] {
         background-color: #e3f2fd !important;
         border-left-color: #007CC3 !important;
     }
@@ -211,10 +231,17 @@ def render_header():
         border-bottom-color: #007CC3 !important;
     }
     
-    /* Checkbox styling */
-    .stCheckbox > label > div[data-testid="stCheckbox"] > div:first-child {
+    /* ========== CHECKBOX STYLING - Infosys Blue ========== */
+    .stCheckbox input[type="checkbox"]:checked + div,
+    .stCheckbox [data-checked="true"],
+    div[data-testid="stCheckbox"] > label > div:first-child,
+    [data-baseweb="checkbox"] input:checked ~ div {
         background-color: #007CC3 !important;
         border-color: #007CC3 !important;
+    }
+    
+    .stCheckbox svg {
+        fill: #007CC3 !important;
     }
     
     /* Selectbox focus */
@@ -223,8 +250,10 @@ def render_header():
     }
     
     /* Radio button selected */
-    .stRadio > div > label > div:first-child {
+    .stRadio > div > label > div:first-child,
+    [data-baseweb="radio"] input:checked ~ div {
         color: #007CC3 !important;
+        border-color: #007CC3 !important;
     }
     
     /* Metric styling */
@@ -242,20 +271,19 @@ def render_header():
     # Render demo mode banner if in demo mode
     render_mode_banner()
     
-    # Professional header with Infosys branding - Logo on left
+    # Professional header with Infosys text logo
     st.markdown("""
         <div style="background: linear-gradient(135deg, #007CC3 0%, #232F3E 100%); 
-                    padding: 1.2rem 2rem; border-radius: 8px; margin-bottom: 1.5rem; color: white;
-                    display: flex; align-items: center; gap: 20px;">
-            <img src="https://logos-world.net/wp-content/uploads/2020/12/Infosys-Logo.png" 
-                 alt="Infosys" 
-                 style="height: 40px; filter: brightness(0) invert(1);"
-                 onerror="this.outerHTML='<span style=font-size:24px;font-weight:bold;>INFOSYS</span>'">
-            <div style="border-left: 2px solid rgba(255,255,255,0.3); padding-left: 20px;">
-                <h1 style="margin: 0; font-size: 1.6rem; font-weight: 600;">
+                    padding: 1rem 1.5rem; border-radius: 8px; margin-bottom: 1.5rem; color: white;
+                    display: flex; align-items: center; gap: 15px;">
+            <div style="background: white; padding: 6px 14px; border-radius: 4px;">
+                <span style="font-size: 18px; font-weight: 700; color: #007CC3; letter-spacing: 2px;">INFOSYS</span>
+            </div>
+            <div style="border-left: 2px solid rgba(255,255,255,0.3); padding-left: 15px;">
+                <h1 style="margin: 0; font-size: 1.5rem; font-weight: 600;">
                     AI-Based AWS Well-Architected Framework Advisor
                 </h1>
-                <p style="margin: 0.3rem 0 0 0; font-size: 0.9rem; opacity: 0.9;">
+                <p style="margin: 0.2rem 0 0 0; font-size: 0.85rem; opacity: 0.9;">
                     Scan AWS Accounts & Ensure Well-Architected Framework Alignment
                 </p>
             </div>
