@@ -778,9 +778,9 @@ def get_auth_manager() -> SSOAuthManager:
 # ============================================================================
 
 def render_login_page():
-    """Render the full-screen login page"""
+    """Render the full-screen professional login page with Infosys branding"""
     
-    # Custom CSS for full-screen login
+    # Professional CSS - Infosys Blue (#007CC3) and clean white theme
     st.markdown("""
     <style>
     /* Hide sidebar completely on login page */
@@ -788,75 +788,56 @@ def render_login_page():
         display: none !important;
     }
     
-    /* Center the login form */
-    .login-wrapper {
-        display: flex;
-        justify-content: center;
-        align-items: center;
-        min-height: 80vh;
+    /* Clean background */
+    .stApp {
+        background: linear-gradient(180deg, #f8f9fa 0%, #ffffff 100%);
     }
     
-    .login-container {
-        max-width: 450px;
-        width: 100%;
-        padding: 40px;
-        background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
-        border-radius: 20px;
-        border: 2px solid #FF9900;
-        box-shadow: 0 20px 60px rgba(255, 153, 0, 0.3);
+    /* Professional button styling - Infosys Blue */
+    .stButton > button[kind="primary"] {
+        background: linear-gradient(135deg, #007CC3 0%, #0066A1 100%) !important;
+        border: none !important;
+        color: white !important;
+        font-weight: 500 !important;
+        border-radius: 6px !important;
+        padding: 0.5rem 1rem !important;
     }
     
-    .login-header {
-        text-align: center;
-        margin-bottom: 30px;
+    .stButton > button[kind="primary"]:hover {
+        background: linear-gradient(135deg, #0066A1 0%, #005080 100%) !important;
     }
     
-    .login-logo {
-        font-size: 60px;
-        margin-bottom: 10px;
+    .stButton > button[kind="secondary"] {
+        background: #ffffff !important;
+        border: 1px solid #007CC3 !important;
+        color: #007CC3 !important;
     }
     
-    .login-title {
-        color: #FF9900;
-        font-size: 28px;
-        font-weight: bold;
-        margin-bottom: 5px;
+    /* Form styling */
+    .stTextInput > div > div > input {
+        border: 1px solid #dee2e6 !important;
+        border-radius: 6px !important;
     }
     
-    .login-subtitle {
-        color: #888;
-        font-size: 14px;
+    .stTextInput > div > div > input:focus {
+        border-color: #007CC3 !important;
+        box-shadow: 0 0 0 2px rgba(0, 124, 195, 0.1) !important;
     }
     
-    .login-footer {
-        text-align: center;
-        margin-top: 20px;
-        padding-top: 20px;
-        border-top: 1px solid #333;
+    /* Professional alert colors */
+    .stSuccess {
+        background-color: #d4edda !important;
+        border-left-color: #28a745 !important;
     }
     
-    .feature-list {
-        display: grid;
-        grid-template-columns: repeat(2, 1fr);
-        gap: 15px;
-        margin-top: 30px;
+    .stWarning {
+        background-color: #fff3cd !important;
+        border-left-color: #ffc107 !important;
     }
     
-    .feature-item {
-        background: rgba(255, 153, 0, 0.1);
-        padding: 15px;
-        border-radius: 10px;
-        text-align: center;
-    }
-    
-    .feature-icon {
-        font-size: 24px;
-        margin-bottom: 5px;
-    }
-    
-    .feature-text {
-        font-size: 12px;
-        color: #ccc;
+    .stError {
+        background-color: #f8d7da !important;
+        border-left-color: #dc3545 !important;
     }
     </style>
     """, unsafe_allow_html=True)
@@ -865,34 +846,47 @@ def render_login_page():
     col1, col2, col3 = st.columns([1, 2, 1])
     
     with col2:
-        # Header with logo
+        # Infosys Logo and Professional Header
         st.markdown("""
-        <div style="text-align: center; margin-bottom: 30px;">
-            <div style="font-size: 70px;">🏗️</div>
-            <h1 style="color: #FF9900; margin: 10px 0;">AWS WAF Scanner</h1>
-            <p style="color: #888; font-size: 16px;">Enterprise Edition</p>
+        <div style="text-align: center; margin-bottom: 25px; margin-top: 20px;">
+            <!-- Infosys Logo -->
+            <img src="https://logos-world.net/wp-content/uploads/2020/12/Infosys-Logo.png" 
+                 alt="Infosys" 
+                 style="height: 45px; margin-bottom: 20px;">
         </div>
         """, unsafe_allow_html=True)
         
-        # Login form container
+        # Application Title
         st.markdown("""
-        <div style="background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); 
-                    padding: 30px; border-radius: 15px; border: 1px solid #FF9900;
-                    box-shadow: 0 10px 40px rgba(255, 153, 0, 0.2);">
+        <div style="text-align: center; margin-bottom: 30px;">
+            <h1 style="color: #232F3E; margin: 0; font-size: 26px; font-weight: 600; line-height: 1.3;">
+                AI-Based AWS Well-Architected
+            </h1>
+            <h2 style="color: #007CC3; margin: 8px 0 0 0; font-size: 22px; font-weight: 500;">
+                Framework Advisor
+            </h2>
+            <p style="color: #6c757d; font-size: 14px; margin-top: 8px;">Enterprise Edition</p>
+        </div>
         """, unsafe_allow_html=True)
         
-        st.markdown("### 🔐 Sign In to Continue")
-        st.markdown("---")
+        # Login Form Card - Clean white design
+        st.markdown("""
+        <div style="background: #ffffff; padding: 28px 32px; border-radius: 8px; 
+                    box-shadow: 0 2px 8px rgba(0,0,0,0.08); border: 1px solid #e9ecef;">
+        """, unsafe_allow_html=True)
+        
+        st.markdown('<p style="font-size: 17px; font-weight: 500; color: #333; margin-bottom: 0;">Sign In to Continue</p>', unsafe_allow_html=True)
+        st.markdown('<hr style="margin: 12px 0 20px 0; border: none; border-top: 1px solid #e9ecef;">', unsafe_allow_html=True)
         
         with st.form("login_form", clear_on_submit=False):
             email = st.text_input(
-                "📧 Email Address", 
-                placeholder="admin@wafscanner.local",
+                "Email Address", 
+                placeholder="Enter your email",
                 help="Enter your registered email address"
             )
             
             password = st.text_input(
-                "🔑 Password", 
+                "Password", 
                 type="password", 
                 placeholder="Enter your password",
                 help="Enter your password"
@@ -904,103 +898,83 @@ def render_login_page():
             with col_b:
                 st.markdown(
                     "<div style='text-align: right; padding-top: 5px;'>"
-                    "<a href='#' style='color: #FF9900; font-size: 12px;'>Forgot password?</a>"
+                    "<a href='#' style='color: #007CC3; font-size: 12px; text-decoration: none;'>Forgot password?</a>"
                     "</div>", 
                     unsafe_allow_html=True
                 )
             
-            st.markdown("")  # Spacing
+            st.markdown("<div style='height: 8px;'></div>", unsafe_allow_html=True)
             
             submitted = st.form_submit_button(
-                "🚀 Sign In", 
+                "Sign In", 
                 use_container_width=True, 
                 type="primary"
             )
             
             if submitted:
                 if not email or not password:
-                    st.error("⚠️ Please enter both email and password")
+                    st.warning("Please enter both email and password")
                 else:
                     auth_mgr = get_auth_manager()
                     success, message, user = auth_mgr.authenticate(email, password)
                     
                     if success and user:
                         SessionManager.login(user)
-                        st.success(f"✅ Welcome back, {user.display_name}!")
-                        st.balloons()
+                        st.success(f"Welcome, {user.display_name}! Redirecting...")
                         import time
-                        time.sleep(1)
+                        time.sleep(0.7)
                         st.rerun()
                     else:
-                        st.error(f"❌ {message}")
+                        st.error(message)
         
         st.markdown("</div>", unsafe_allow_html=True)
         
         # Demo credentials section
-        st.markdown("")
-        st.markdown("")
+        st.markdown("<div style='height: 15px;'></div>", unsafe_allow_html=True)
         
-        with st.expander("🎭 Demo Credentials (Click to expand)"):
+        with st.expander("Demo Access Credentials"):
             st.markdown("""
-            **Default Admin Account:**
+            **Admin Account for Demo:**
             
             | Field | Value |
             |-------|-------|
             | Email | `admin@wafscanner.local` |
             | Password | `Admin@123` |
+            | Access Level | Super Admin (Full Access) |
             
-            *This demo account has full Super Admin access*
+            *You can create users with different roles after login.*
             """)
-            
-            if st.button("📋 Copy Demo Email", key="copy_email"):
-                st.code("admin@wafscanner.local")
-            
-            if st.button("📋 Copy Demo Password", key="copy_pass"):
-                st.code("Admin@123")
         
-        # SSO Options
-        st.markdown("---")
-        st.markdown("#### 🔗 Or sign in with:")
+        # Features section
+        st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True)
         
-        col_g, col_m, col_gh = st.columns(3)
-        with col_g:
-            if st.button("🔵 Google", use_container_width=True, disabled=True):
-                st.info("Requires Firebase")
-        with col_m:
-            if st.button("🟦 Microsoft", use_container_width=True, disabled=True):
-                st.info("Requires Azure AD")
-        with col_gh:
-            if st.button("⚫ GitHub", use_container_width=True, disabled=True):
-                st.info("Requires GitHub OAuth")
-        
-        st.caption("*SSO options require additional configuration*")
-        
-        # Features showcase
-        st.markdown("---")
-        st.markdown("#### ✨ Enterprise Features")
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            st.markdown("""
-            - 🔍 **WAF Scanning** - Multi-account
-            - 🤖 **AI Analysis** - Claude powered
-            - 📊 **Compliance** - CIS, PCI, HIPAA
-            """)
-        with col2:
-            st.markdown("""
-            - 🎨 **Architecture Designer**
-            - 💰 **Cost Optimization**
-            - 📄 **PDF Reports**
-            """)
+        st.markdown("""
+        <div style="background: #f8f9fa; padding: 18px 20px; border-radius: 6px; border: 1px solid #e9ecef;">
+            <p style="font-size: 13px; font-weight: 500; color: #495057; margin-bottom: 10px; text-align: center;">
+                Enterprise Features
+            </p>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px; font-size: 12px; color: #6c757d;">
+                <div>✓ Multi-Account Scanning</div>
+                <div>✓ AI-Powered Analysis</div>
+                <div>✓ Compliance Mapping</div>
+                <div>✓ Cost Optimization</div>
+                <div>✓ PDF Reports</div>
+                <div>✓ Architecture Designer</div>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
         
         # Footer
-        st.markdown("---")
-        st.markdown(
-            "<div style='text-align: center; color: #666; font-size: 12px;'>"
-            "AWS WAF Scanner Enterprise v4.2 | © 2024"
-            "</div>",
-            unsafe_allow_html=True
-        )
+        st.markdown("""
+        <div style="text-align: center; margin-top: 25px; padding-top: 15px; border-top: 1px solid #e9ecef;">
+            <p style="color: #6c757d; font-size: 12px; margin: 0;">
+                Powered by Infosys | AWS Well-Architected Framework
+            </p>
+            <p style="color: #adb5bd; font-size: 11px; margin-top: 4px;">
+                © 2024 All Rights Reserved
+            </p>
+        </div>
+        """, unsafe_allow_html=True)
 
 
 def render_user_menu():

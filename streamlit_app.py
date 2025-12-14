@@ -48,8 +48,8 @@ except Exception as e:
 
 # Page configuration
 st.set_page_config(
-    page_title="AI-Based Well-Architected Framework",
-    page_icon="🏗️",
+    page_title="AI-Based Well-Architected Framework Advisor",
+    page_icon="☁️",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -147,20 +147,118 @@ except Exception as e:
 # ============================================================================
 
 def render_header():
-    """Render application header"""
+    """Render application header with Infosys branding"""
+    
+    # Global CSS to fix colors throughout the application
+    st.markdown("""
+    <style>
+    /* Professional color scheme - Infosys Blue */
+    :root {
+        --infosys-blue: #007CC3;
+        --infosys-dark-blue: #005A8C;
+        --aws-orange: #FF9900;
+        --aws-dark: #232F3E;
+    }
+    
+    /* Fix primary button colors - Use Infosys Blue instead of red */
+    .stButton > button[kind="primary"] {
+        background: linear-gradient(135deg, #007CC3 0%, #0066A1 100%) !important;
+        border: none !important;
+    }
+    
+    .stButton > button[kind="primary"]:hover {
+        background: linear-gradient(135deg, #0066A1 0%, #005080 100%) !important;
+    }
+    
+    /* Fix form submit buttons */
+    .stFormSubmitButton > button {
+        background: linear-gradient(135deg, #007CC3 0%, #0066A1 100%) !important;
+        border: none !important;
+    }
+    
+    /* Success messages - Professional green */
+    .stSuccess, div[data-baseweb="notification"][kind="positive"] {
+        background-color: #d4edda !important;
+        border-left-color: #28a745 !important;
+    }
+    
+    /* Warning messages - Amber/Orange */
+    .stWarning, div[data-baseweb="notification"][kind="warning"] {
+        background-color: #fff3cd !important;
+        border-left-color: #ffc107 !important;
+    }
+    
+    /* Error messages - Softer red */
+    .stError, div[data-baseweb="notification"][kind="negative"] {
+        background-color: #f8d7da !important;
+        border-left-color: #c0392b !important;
+    }
+    
+    /* Info messages - Infosys Blue */
+    .stInfo, div[data-baseweb="notification"][kind="info"] {
+        background-color: #e3f2fd !important;
+        border-left-color: #007CC3 !important;
+    }
+    
+    /* Progress bars */
+    .stProgress > div > div > div > div {
+        background-color: #007CC3 !important;
+    }
+    
+    /* Tabs styling */
+    .stTabs [data-baseweb="tab-list"] button[aria-selected="true"] {
+        color: #007CC3 !important;
+        border-bottom-color: #007CC3 !important;
+    }
+    
+    /* Checkbox styling */
+    .stCheckbox > label > div[data-testid="stCheckbox"] > div:first-child {
+        background-color: #007CC3 !important;
+        border-color: #007CC3 !important;
+    }
+    
+    /* Selectbox focus */
+    div[data-baseweb="select"] > div:focus-within {
+        border-color: #007CC3 !important;
+    }
+    
+    /* Radio button selected */
+    .stRadio > div > label > div:first-child {
+        color: #007CC3 !important;
+    }
+    
+    /* Metric styling */
+    [data-testid="stMetricValue"] {
+        color: #007CC3 !important;
+    }
+    
+    /* Expander headers */
+    .streamlit-expanderHeader:hover {
+        color: #007CC3 !important;
+    }
+    </style>
+    """, unsafe_allow_html=True)
     
     # Render demo mode banner if in demo mode
     render_mode_banner()
     
+    # Professional header with Infosys branding - Logo on left
     st.markdown("""
-        <div style="background: linear-gradient(135deg, #FF9900 0%, #232F3E 100%); 
-                    padding: 2rem; border-radius: 10px; margin-bottom: 2rem; color: white;">
-            <h1 style="margin: 0; font-size: 2.5rem;">
-                🏗️ AI-Based Well-Architected Framework Advisor
-            </h1>
-            <p style="margin: 0.5rem 0 0 0; font-size: 1.1rem; opacity: 0.95;">
-                Scan AWS Accounts & Ensure Well-Architected Framework Alignment
-            </p>
+        <div style="background: linear-gradient(135deg, #007CC3 0%, #232F3E 100%); 
+                    padding: 1.2rem 2rem; border-radius: 8px; margin-bottom: 1.5rem; color: white;
+                    display: flex; align-items: center; gap: 20px;">
+            <img src="https://logos-world.net/wp-content/uploads/2020/12/Infosys-Logo.png" 
+                 alt="Infosys" 
+                 style="height: 40px; filter: brightness(0) invert(1);"
+                 onerror="this.outerHTML='<span style=font-size:24px;font-weight:bold;>INFOSYS</span>'">
+            <div style="border-left: 2px solid rgba(255,255,255,0.3); padding-left: 20px;">
+                <h1 style="margin: 0; font-size: 1.6rem; font-weight: 600;">
+                    AI-Based AWS Well-Architected Framework Advisor
+                </h1>
+                <p style="margin: 0.3rem 0 0 0; font-size: 0.9rem; opacity: 0.9;">
+                    Scan AWS Accounts & Ensure Well-Architected Framework Alignment
+                </p>
+            </div>
         </div>
     """, unsafe_allow_html=True)
 
@@ -180,23 +278,24 @@ def render_sidebar():
             if user:
                 st.markdown("### 👤 Logged In As")
                 
+                # Professional role colors - Infosys blue theme
                 role_colors = {
-                    UserRole.SUPER_ADMIN: "#ff4444",
-                    UserRole.ADMIN: "#ff9900",
-                    UserRole.MANAGER: "#ffcc00",
-                    UserRole.USER: "#44bb44",
-                    UserRole.VIEWER: "#4488ff",
-                    UserRole.GUEST: "#888888",
+                    UserRole.SUPER_ADMIN: "#007CC3",  # Infosys Blue
+                    UserRole.ADMIN: "#0066A1",        # Dark Blue
+                    UserRole.MANAGER: "#17a2b8",      # Teal
+                    UserRole.USER: "#28a745",         # Green
+                    UserRole.VIEWER: "#6c757d",       # Gray
+                    UserRole.GUEST: "#adb5bd",        # Light Gray
                 }
                 
-                role_color = role_colors.get(user.role, "#888888")
+                role_color = role_colors.get(user.role, "#6c757d")
                 
                 st.markdown(f"""
-                <div style="padding: 12px; background: linear-gradient(135deg, {role_color}22, {role_color}44); 
-                            border-radius: 10px; border: 1px solid {role_color}; margin-bottom: 15px;">
-                    <div style="font-weight: bold; color: white; font-size: 16px;">{user.display_name}</div>
-                    <div style="font-size: 13px; color: {role_color}; margin: 3px 0;">🏷️ {user.role.name.replace('_', ' ').title()}</div>
-                    <div style="font-size: 11px; color: #aaa;">{user.email}</div>
+                <div style="padding: 12px; background: linear-gradient(135deg, {role_color}15, {role_color}25); 
+                            border-radius: 8px; border: 1px solid {role_color}; margin-bottom: 15px;">
+                    <div style="font-weight: 600; color: #333; font-size: 15px;">{user.display_name}</div>
+                    <div style="font-size: 12px; color: {role_color}; margin: 4px 0; font-weight: 500;">{user.role.name.replace('_', ' ').title()}</div>
+                    <div style="font-size: 11px; color: #666;">{user.email}</div>
                 </div>
                 """, unsafe_allow_html=True)
                 
@@ -207,7 +306,7 @@ def render_sidebar():
                             st.session_state.show_admin_panel = True
                             st.rerun()
                 with col_b:
-                    if st.button("🚪 Logout", use_container_width=True, key="sidebar_logout_btn"):
+                    if st.button("Logout", use_container_width=True, key="sidebar_logout_btn"):
                         SessionManager.logout()
                         st.rerun()
                 
