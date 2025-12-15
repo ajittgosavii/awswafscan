@@ -691,11 +691,14 @@ class SSOAuthManager:
     
     def _firebase_create_user(self, email: str, password: str, display_name: str,
                              role: str, organization_id: str, created_by: str) -> Tuple[bool, str, Optional[User]]:
-        """Create user in Firebase"""
+        """Create user in Firebase with optimized performance"""
         try:
             from firebase_admin import auth
+            import time
             
-            # Create in Firebase Auth
+            start_time = time.time()
+            
+            # Create in Firebase Auth (this is the slower operation)
             firebase_user = auth.create_user(
                 email=email,
                 password=password,
@@ -703,7 +706,9 @@ class SSOAuthManager:
                 email_verified=False
             )
             
-            # Create profile in Firestore
+            auth_time = time.time() - start_time
+            
+            # Create profile in Firestore (async-friendly)
             user_data = {
                 'uid': firebase_user.uid,
                 'email': email,
@@ -717,13 +722,21 @@ class SSOAuthManager:
                 'email_verified': False,
             }
             
-            self.db.collection('users').document(firebase_user.uid).set(user_data)
+            # Use set with merge=True for better performance
+            self.db.collection('users').document(firebase_user.uid).set(user_data, merge=True)
+            
+            total_time = time.time() - start_time
             
             user = User.from_dict(user_data)
-            return True, "User created successfully", user
+            return True, f"User created successfully ({total_time:.1f}s)", user
             
+        except auth.EmailAlreadyExistsError:
+            return False, f"A user with email '{email}' already exists", None
         except Exception as e:
-            return False, f"Error creating user: {str(e)}", None
+            error_msg = str(e)
+            if "TIMEOUT" in error_msg.upper() or "deadline" in error_msg.lower():
+                return False, "Request timed out. Please check your network connection and try again.", None
+            return False, f"Error creating user: {error_msg}", None
     
     def update_user(self, uid: str, updates: Dict) -> Tuple[bool, str]:
         """Update user"""
@@ -792,19 +805,46 @@ class SSOAuthManager:
         except Exception as e:
             return False, f"Error deactivating user: {str(e)}"
     
-    def get_all_users(self) -> List[User]:
-        """Get all users"""
+    def get_all_users(self, force_refresh: bool = False) -> List[User]:
+        """Get all users with caching for better performance"""
+        cache_key = 'cached_users_list'
+        cache_time_key = 'cached_users_timestamp'
+        cache_duration = 30  # Cache for 30 seconds
+        
+        # Check cache first (unless force refresh)
+        if not force_refresh:
+            if cache_key in st.session_state and cache_time_key in st.session_state:
+                cache_age = (datetime.now() - st.session_state[cache_time_key]).total_seconds()
+                if cache_age < cache_duration:
+                    return st.session_state[cache_key]
+        
         if self.firebase_available:
             try:
                 users = []
-                docs = self.db.collection('users').stream()
+                # Use limit for better performance - paginate if needed
+                docs = self.db.collection('users').limit(500).stream()
                 for doc in docs:
                     users.append(User.from_dict(doc.to_dict()))
+                
+                # Update cache
+                st.session_state[cache_key] = users
+                st.session_state[cache_time_key] = datetime.now()
                 return users
             except:
                 pass
         
-        return self.local_store.get_all_users()
+        users = self.local_store.get_all_users()
+        # Cache local store results too
+        st.session_state[cache_key] = users
+        st.session_state[cache_time_key] = datetime.now()
+        return users
+    
+    def invalidate_user_cache(self):
+        """Invalidate the user cache to force refresh on next fetch"""
+        if 'cached_users_list' in st.session_state:
+            del st.session_state['cached_users_list']
+        if 'cached_users_timestamp' in st.session_state:
+            del st.session_state['cached_users_timestamp']
     
     def get_audit_logs(self, limit: int = 100) -> List[Dict]:
         """Get audit logs"""
@@ -1328,20 +1368,37 @@ def _render_user_management():
                     elif len(new_password) < 6:
                         st.error("Password must be at least 6 characters")
                     else:
-                        success, message, user = auth_mgr.create_user(
-                            new_email, new_password, new_name, new_role, new_org
-                        )
-                        if success:
-                            st.success(message)
-                            st.session_state.show_add_user_form = False
-                            st.rerun()
-                        else:
-                            st.error(message)
+                        with st.spinner("🔄 Creating user account..."):
+                            success, message, user = auth_mgr.create_user(
+                                new_email, new_password, new_name, new_role, new_org
+                            )
+                            if success:
+                                # Invalidate cache to show new user immediately
+                                auth_mgr.invalidate_user_cache()
+                                st.success(message)
+                                st.session_state.show_add_user_form = False
+                                st.rerun()
+                            else:
+                                st.error(message)
     
     # User list
     st.markdown("### 📋 All Users")
     
-    users = auth_mgr.get_all_users()
+    # Refresh button and status
+    col_refresh, col_status = st.columns([1, 3])
+    with col_refresh:
+        if st.button("🔄 Refresh", help="Refresh user list from database"):
+            auth_mgr.invalidate_user_cache()
+            st.rerun()
+    
+    with col_status:
+        if 'cached_users_timestamp' in st.session_state:
+            cache_age = (datetime.now() - st.session_state['cached_users_timestamp']).total_seconds()
+            st.caption(f"📋 Data cached {int(cache_age)}s ago")
+    
+    # Get users with caching
+    with st.spinner("Loading users..."):
+        users = auth_mgr.get_all_users()
     
     # Filter options
     col1, col2, col3 = st.columns(3)
@@ -1392,30 +1449,36 @@ def _render_user_management():
                     col_a, col_b = st.columns(2)
                     with col_a:
                         if st.button("💾 Update", key=f"update_{user.uid}"):
-                            success, msg = auth_mgr.update_user(user.uid, {"role": new_role})
-                            if success:
-                                st.success(msg)
-                                st.rerun()
-                            else:
-                                st.error(msg)
+                            with st.spinner("Updating..."):
+                                success, msg = auth_mgr.update_user(user.uid, {"role": new_role})
+                                if success:
+                                    auth_mgr.invalidate_user_cache()
+                                    st.success(msg)
+                                    st.rerun()
+                                else:
+                                    st.error(msg)
                     
                     with col_b:
                         if user.active:
                             if st.button("🚫 Disable", key=f"disable_{user.uid}"):
-                                success, msg = auth_mgr.delete_user(user.uid)
-                                if success:
-                                    st.success(msg)
-                                    st.rerun()
-                                else:
-                                    st.error(msg)
+                                with st.spinner("Disabling user..."):
+                                    success, msg = auth_mgr.delete_user(user.uid)
+                                    if success:
+                                        auth_mgr.invalidate_user_cache()
+                                        st.success(msg)
+                                        st.rerun()
+                                    else:
+                                        st.error(msg)
                         else:
                             if st.button("✅ Enable", key=f"enable_{user.uid}"):
-                                success, msg = auth_mgr.update_user(user.uid, {"active": True})
-                                if success:
-                                    st.success(msg)
-                                    st.rerun()
-                                else:
-                                    st.error(msg)
+                                with st.spinner("Enabling user..."):
+                                    success, msg = auth_mgr.update_user(user.uid, {"active": True})
+                                    if success:
+                                        auth_mgr.invalidate_user_cache()
+                                        st.success(msg)
+                                        st.rerun()
+                                    else:
+                                        st.error(msg)
     
     st.markdown(f"**Total Users:** {len(filtered_users)}")
 
